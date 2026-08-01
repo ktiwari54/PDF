@@ -277,10 +277,21 @@ export const tools: ToolDef[] = [
     id: 'watermark',
     name: 'Add watermark',
     description:
-      'Stamp an image or text over your PDF in seconds. Choose typography and transparency.',
+      'Stamp text over every page — center, tile, top, or bottom with opacity control.',
     category: 'edit',
     color: '#c084fc',
     icon: 'watermark',
+    accept: 'application/pdf',
+    multiple: false,
+  },
+  {
+    id: 'remove-watermark',
+    name: 'Remove watermark',
+    description:
+      'Cover or strip watermark text (CONFIDENTIAL, DRAFT, etc.) or clear the center band.',
+    category: 'edit',
+    color: '#fb7185',
+    icon: 'remove-watermark',
     accept: 'application/pdf',
     multiple: false,
   },

@@ -199,29 +199,211 @@ function placeText(
   page.drawText(label, { x, y, size, font, color: rgb(0.2, 0.2, 0.2) })
 }
 
+export type WatermarkOptions = {
+  text: string
+  opacity?: number
+  /** rotation degrees */
+  angle?: number
+  /** relative font size vs page (default ~1/9) */
+  scale?: number
+  position?: 'center' | 'tile' | 'top' | 'bottom'
+  color?: { r: number; g: number; b: number }
+}
+
 export async function addWatermark(
   file: File,
-  text: string,
-  opacity = 0.28,
+  textOrOpts: string | WatermarkOptions,
+  opacityArg = 0.28,
 ): Promise<Uint8Array> {
-  if (!text.trim()) throw new Error('Enter watermark text.')
+  const opts: WatermarkOptions =
+    typeof textOrOpts === 'string'
+      ? { text: textOrOpts, opacity: opacityArg }
+      : textOrOpts
+  const text = (opts.text || '').trim()
+  if (!text) throw new Error('Enter watermark text.')
+  const opacity = opts.opacity ?? 0.28
+  const angle = opts.angle ?? 45
+  const position = opts.position ?? 'center'
+  const color = opts.color ?? { r: 0.45, g: 0.45, b: 0.45 }
+
   const doc = await loadDoc(file)
   const font = await doc.embedFont(StandardFonts.HelveticaBold)
+
   doc.getPages().forEach((page) => {
     const { width, height } = page.getSize()
-    const size = Math.min(width, height) / 9
-    const tw = font.widthOfTextAtSize(text, size)
-    page.drawText(text, {
-      x: Math.max(20, (width - tw) / 2),
-      y: height / 2 - size / 2,
-      size,
-      font,
-      color: rgb(0.45, 0.45, 0.45),
-      opacity,
-      rotate: degrees(45),
-    })
+    const size = Math.min(width, height) / (opts.scale ? 1 / opts.scale : 9)
+    const fontSize = Math.max(10, Math.min(size, 120))
+    const tw = font.widthOfTextAtSize(text, fontSize)
+    const drawAt = (x: number, y: number) => {
+      page.drawText(text, {
+        x,
+        y,
+        size: fontSize,
+        font,
+        color: rgb(color.r, color.g, color.b),
+        opacity,
+        rotate: degrees(angle),
+      })
+    }
+
+    if (position === 'tile') {
+      const stepX = Math.max(tw * 1.4, width / 2.2)
+      const stepY = Math.max(fontSize * 4, height / 3)
+      for (let y = stepY / 2; y < height; y += stepY) {
+        for (let x = 20; x < width - 20; x += stepX) {
+          drawAt(x, y)
+        }
+      }
+    } else if (position === 'top') {
+      drawAt(Math.max(20, (width - tw) / 2), height - fontSize * 2)
+    } else if (position === 'bottom') {
+      drawAt(Math.max(20, (width - tw) / 2), fontSize * 1.5)
+    } else {
+      drawAt(Math.max(20, (width - tw) / 2), height / 2 - fontSize / 2)
+    }
   })
   return doc.save()
+}
+
+export type RemoveWatermarkOptions = {
+  /** Text to find and cover (e.g. CONFIDENTIAL). Empty = common patterns + auto. */
+  keyword?: string
+  mode?: 'text' | 'center-band' | 'both'
+  /** Cover color (default white) */
+  coverColor?: { r: number; g: number; b: number }
+}
+
+const COMMON_WATERMARKS = [
+  'confidential',
+  'draft',
+  'sample',
+  'watermark',
+  'do not copy',
+  'preview',
+  'unauthorized',
+  'internal use',
+  'copy',
+  'top secret',
+  'not for distribution',
+  'specimen',
+]
+
+/**
+ * Remove / cover watermarks.
+ * - text: find matching text runs via pdf.js and cover their boxes
+ * - center-band: cover typical center watermark strip
+ * - both: try text first; if nothing found, use center band
+ * Image/baked watermarks may need center-band or Live Editor whiteout.
+ */
+export async function removeWatermark(
+  file: File,
+  options: RemoveWatermarkOptions = {},
+): Promise<{ bytes: Uint8Array; covered: number; method: string }> {
+  const mode = options.mode || 'both'
+  const cover = options.coverColor ?? { r: 1, g: 1, b: 1 }
+  const keyword = (options.keyword || '').trim().toLowerCase()
+  const doc = await loadDoc(file)
+  const data = await fileToBytes(file)
+  const pdf = await pdfjs.getDocument({ data: data.slice() }).promise
+  const pages = doc.getPages()
+
+  let covered = 0
+
+  if (mode === 'text' || mode === 'both') {
+    for (let i = 0; i < pdf.numPages; i++) {
+      const page = pages[i]
+      if (!page) continue
+      const { width: W, height: H } = page.getSize()
+      const p = await pdf.getPage(i + 1)
+      const viewport = p.getViewport({ scale: 1 })
+      const content = await p.getTextContent()
+
+      for (const item of content.items) {
+        if (!('str' in item)) continue
+        const it = item as {
+          str: string
+          transform: number[]
+          width: number
+          height: number
+        }
+        const str = String(it.str).trim()
+        if (!str) continue
+        const lower = str.toLowerCase()
+        const matchesKeyword = keyword
+          ? lower.includes(keyword)
+          : COMMON_WATERMARKS.some((w) => lower.includes(w))
+        const fontH = Math.hypot(it.transform[2], it.transform[3])
+        const largeCaps =
+          !keyword &&
+          fontH > Math.min(W, H) * 0.035 &&
+          str.length >= 4 &&
+          str.length < 48 &&
+          str === str.toUpperCase() &&
+          /[A-Z]/.test(str)
+
+        if (!matchesKeyword && !largeCaps) continue
+
+        const m = pdfjs.Util.transform(viewport.transform, it.transform)
+        const fontHeight = Math.hypot(m[2], m[3])
+        const fontWidthScale = Math.hypot(m[0], m[1])
+        const wPx = (it.width || str.length * 0.5) * fontWidthScale
+        const hPx = Math.max(fontHeight, 8)
+        const left = m[4]
+        const topVp = m[5] - hPx * 0.85
+        const scaleX = W / viewport.width
+        const scaleY = H / viewport.height
+        const boxW = Math.max(wPx * scaleX + 12, 24)
+        const boxH = hPx * scaleY + 10
+        const x = left * scaleX - 6
+        const y = H - (topVp * scaleY + boxH)
+
+        page.drawRectangle({
+          x: Math.max(0, x),
+          y: Math.max(0, y),
+          width: Math.min(boxW, W),
+          height: Math.min(boxH, H),
+          color: rgb(cover.r, cover.g, cover.b),
+          borderWidth: 0,
+        })
+        covered++
+      }
+    }
+  }
+
+  let method = covered > 0 ? `covered ${covered} text region(s)` : ''
+
+  if (mode === 'center-band' || (mode === 'both' && covered === 0)) {
+    for (const page of pages) {
+      const { width: W, height: H } = page.getSize()
+      const bandH = H * 0.16
+      page.drawRectangle({
+        x: W * 0.06,
+        y: H / 2 - bandH / 2,
+        width: W * 0.88,
+        height: bandH,
+        color: rgb(cover.r, cover.g, cover.b),
+        borderWidth: 0,
+      })
+    }
+    method =
+      covered > 0
+        ? method
+        : 'applied center-band cover (use keyword for precise text removal)'
+  }
+
+  if (mode === 'text' && covered === 0) {
+    throw new Error(
+      keyword
+        ? `No text matching “${options.keyword}” was found. Try Center band mode or Live Editor whiteout.`
+        : 'No common watermark text found. Enter the watermark words, or use Center band mode.',
+    )
+  }
+
+  return {
+    bytes: await doc.save(),
+    covered,
+    method: method || 'done',
+  }
 }
 
 export async function cropPdf(file: File, margin: number): Promise<Uint8Array> {

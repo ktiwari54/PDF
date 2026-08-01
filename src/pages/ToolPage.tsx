@@ -34,6 +34,15 @@ export function ToolPage() {
   const [pageRange, setPageRange] = useState('')
   const [rotateAngle, setRotateAngle] = useState<90 | 180 | 270>(90)
   const [watermark, setWatermark] = useState('CONFIDENTIAL')
+  const [wmOpacity, setWmOpacity] = useState(0.28)
+  const [wmPosition, setWmPosition] = useState<
+    'center' | 'tile' | 'top' | 'bottom'
+  >('center')
+  const [wmAngle, setWmAngle] = useState(45)
+  const [rmWmKeyword, setRmWmKeyword] = useState('')
+  const [rmWmMode, setRmWmMode] = useState<'text' | 'center-band' | 'both'>(
+    'both',
+  )
   const [cropMargin, setCropMargin] = useState(36)
   const [password, setPassword] = useState('')
   const [editText, setEditText] = useState('Annotated with PDF Tools')
@@ -282,9 +291,27 @@ export function ToolPage() {
           break
         }
         case 'watermark': {
-          const bytes = await ops.addWatermark(f, watermark)
+          const bytes = await ops.addWatermark(f, {
+            text: watermark,
+            opacity: wmOpacity,
+            position: wmPosition,
+            angle: wmAngle,
+          })
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_watermark.pdf`)
           break
+        }
+        case 'remove-watermark': {
+          const { bytes, method } = await ops.removeWatermark(f, {
+            keyword: rmWmKeyword,
+            mode: rmWmMode,
+          })
+          ops.downloadBytes(bytes, `${ops.baseName(f.name)}_no_watermark.pdf`)
+          setStatus({
+            type: 'success',
+            msg: `Done — ${method}. Download started.`,
+          })
+          setBusy(false)
+          return
         }
         case 'crop-pdf': {
           const bytes = await ops.cropPdf(f, cropMargin)
@@ -600,6 +627,16 @@ export function ToolPage() {
           setRotateAngle={setRotateAngle}
           watermark={watermark}
           setWatermark={setWatermark}
+          wmOpacity={wmOpacity}
+          setWmOpacity={setWmOpacity}
+          wmPosition={wmPosition}
+          setWmPosition={setWmPosition}
+          wmAngle={wmAngle}
+          setWmAngle={setWmAngle}
+          rmWmKeyword={rmWmKeyword}
+          setRmWmKeyword={setRmWmKeyword}
+          rmWmMode={rmWmMode}
+          setRmWmMode={setRmWmMode}
           cropMargin={cropMargin}
           setCropMargin={setCropMargin}
           password={password}
@@ -686,6 +723,16 @@ function Options(props: {
   setRotateAngle: (v: 90 | 180 | 270) => void
   watermark: string
   setWatermark: (v: string) => void
+  wmOpacity: number
+  setWmOpacity: (v: number) => void
+  wmPosition: 'center' | 'tile' | 'top' | 'bottom'
+  setWmPosition: (v: 'center' | 'tile' | 'top' | 'bottom') => void
+  wmAngle: number
+  setWmAngle: (v: number) => void
+  rmWmKeyword: string
+  setRmWmKeyword: (v: string) => void
+  rmWmMode: 'text' | 'center-band' | 'both'
+  setRmWmMode: (v: 'text' | 'center-band' | 'both') => void
   cropMargin: number
   setCropMargin: (v: number) => void
   password: string
@@ -714,6 +761,7 @@ function Options(props: {
     'split-pdf',
     'rotate-pdf',
     'watermark',
+    'remove-watermark',
     'crop-pdf',
     'page-numbers',
     'protect-pdf',
@@ -824,13 +872,89 @@ function Options(props: {
         </label>
       )}
       {id === 'watermark' && (
-        <label>
-          Watermark text
-          <input
-            value={props.watermark}
-            onChange={(e) => props.setWatermark(e.target.value)}
-          />
-        </label>
+        <>
+          <label>
+            Watermark text
+            <input
+              value={props.watermark}
+              onChange={(e) => props.setWatermark(e.target.value)}
+              placeholder="CONFIDENTIAL"
+            />
+          </label>
+          <label>
+            Position
+            <select
+              value={props.wmPosition}
+              onChange={(e) =>
+                props.setWmPosition(
+                  e.target.value as 'center' | 'tile' | 'top' | 'bottom',
+                )
+              }
+            >
+              <option value="center">Center (diagonal)</option>
+              <option value="tile">Tile across page</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+            </select>
+          </label>
+          <label>
+            Opacity {Math.round(props.wmOpacity * 100)}%
+            <input
+              type="range"
+              min={0.08}
+              max={0.7}
+              step={0.02}
+              value={props.wmOpacity}
+              onChange={(e) => props.setWmOpacity(Number(e.target.value))}
+            />
+          </label>
+          <label>
+            Angle {props.wmAngle}°
+            <input
+              type="range"
+              min={-90}
+              max={90}
+              step={5}
+              value={props.wmAngle}
+              onChange={(e) => props.setWmAngle(Number(e.target.value))}
+            />
+          </label>
+        </>
+      )}
+      {id === 'remove-watermark' && (
+        <>
+          <label>
+            Watermark text to remove (optional)
+            <input
+              value={props.rmWmKeyword}
+              onChange={(e) => props.setRmWmKeyword(e.target.value)}
+              placeholder="e.g. CONFIDENTIAL, DRAFT, SAMPLE"
+            />
+          </label>
+          <label>
+            Removal mode
+            <select
+              value={props.rmWmMode}
+              onChange={(e) =>
+                props.setRmWmMode(
+                  e.target.value as 'text' | 'center-band' | 'both',
+                )
+              }
+            >
+              <option value="both">
+                Auto (match text, else center band)
+              </option>
+              <option value="text">Text match only</option>
+              <option value="center-band">
+                Center band cover (image / faint marks)
+              </option>
+            </select>
+          </label>
+          <p className="muted" style={{ margin: 0 }}>
+            Text watermarks are covered by matching words. For image watermarks
+            use Center band, or whiteout in Live Editor.
+          </p>
+        </>
       )}
       {id === 'crop-pdf' && (
         <label>
