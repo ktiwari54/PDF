@@ -141,6 +141,122 @@ textarea {
   max-width: 560px;
 }
 
+.search-bar {
+  margin: 1.25rem auto 0;
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  box-shadow: var(--shadow);
+  color: var(--muted);
+}
+
+.search-bar input {
+  border: none;
+  outline: none;
+  flex: 1;
+  background: transparent;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.hero-stats {
+  margin-top: 0.85rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.thumb-grid {
+  margin-top: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: #fafafa;
+}
+
+.thumb-grid-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.75rem;
+}
+
+.thumb {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: white;
+  padding: 0.4rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.thumb img {
+  width: 100%;
+  height: 130px;
+  object-fit: contain;
+  background: #eee;
+  border-radius: 4px;
+}
+
+.thumb span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.thumb.selected {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(229, 50, 45, 0.15);
+}
+
+.thumb.organize {
+  cursor: default;
+}
+
+.thumb-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.thumb-actions button {
+  border: 1px solid var(--border);
+  background: #f9fafb;
+  border-radius: 6px;
+  width: 28px;
+  height: 24px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.thumb-actions button:hover {
+  background: #eee;
+}
+
 .category-block {
   margin-bottom: 2.25rem;
 }

@@ -1,20 +1,21 @@
 {
   "name": "pdf-editor",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cantoo/pdf-lib": "^2.8.1",
     "file-saver": "^2.0.5",
+    "html2canvas": "^1.4.1",
     "jspdf": "^3.0.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.511.0",
     "mammoth": "^1.9.0",
-    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.2.133",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

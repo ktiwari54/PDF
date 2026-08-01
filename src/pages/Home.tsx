@@ -1,9 +1,11 @@
+import { useMemo, useState } from 'react'
 import {
   tools,
   categoryMeta,
   type ToolCategory,
 } from '../data/tools'
 import { ToolCard } from '../components/ToolCard'
+import { Search } from 'lucide-react'
 
 const order: ToolCategory[] = [
   'organize',
@@ -16,40 +18,89 @@ const order: ToolCategory[] = [
 ]
 
 export function Home() {
+  const [q, setQ] = useState('')
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    if (!s) return tools
+    return tools.filter(
+      (t) =>
+        t.name.toLowerCase().includes(s) ||
+        t.description.toLowerCase().includes(s) ||
+        t.id.includes(s) ||
+        t.category.includes(s),
+    )
+  }, [q])
+
   return (
     <div className="page">
       <section className="hero">
         <h1>Every tool you need to work with PDFs</h1>
         <p>
           Merge, split, compress, convert, edit, protect, OCR, and more — free
-          in your browser. Files stay on your device.
+          in your browser. Files never leave your device.
         </p>
+        <div className="search-bar">
+          <Search size={18} />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search tools (merge, OCR, watermark…)"
+            aria-label="Search tools"
+          />
+        </div>
+        <div className="hero-stats">
+          <span>{tools.length} tools</span>
+          <span>·</span>
+          <span>100% client-side</span>
+          <span>·</span>
+          <span>No account required</span>
+        </div>
       </section>
 
-      {order.map((cat) => {
-        const list = tools.filter((t) => t.category === cat)
-        const meta = categoryMeta[cat]
-        return (
-          <section
-            key={cat}
-            id={cat === 'convert-to' || cat === 'convert-from' ? 'convert' : cat}
-            className="category-block"
-          >
-            <h2 className="category-title">
-              <span
-                className="category-dot"
-                style={{ background: meta.color }}
-              />
-              {meta.title}
-            </h2>
+      {q.trim() ? (
+        <section className="category-block">
+          <h2 className="category-title">
+            Search results ({filtered.length})
+          </h2>
+          {filtered.length === 0 ? (
+            <p className="muted">No tools match “{q}”.</p>
+          ) : (
             <div className="tools-grid">
-              {list.map((tool) => (
+              {filtered.map((tool) => (
                 <ToolCard key={tool.id} tool={tool} />
               ))}
             </div>
-          </section>
-        )
-      })}
+          )}
+        </section>
+      ) : (
+        order.map((cat) => {
+          const list = tools.filter((t) => t.category === cat)
+          const meta = categoryMeta[cat]
+          return (
+            <section
+              key={cat}
+              id={
+                cat === 'convert-to' || cat === 'convert-from' ? 'convert' : cat
+              }
+              className="category-block"
+            >
+              <h2 className="category-title">
+                <span
+                  className="category-dot"
+                  style={{ background: meta.color }}
+                />
+                {meta.title}
+              </h2>
+              <div className="tools-grid">
+                {list.map((tool) => (
+                  <ToolCard key={tool.id} tool={tool} />
+                ))}
+              </div>
+            </section>
+          )
+        })
+      )}
     </div>
   )
 }

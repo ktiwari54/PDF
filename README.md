@@ -1,60 +1,62 @@
-# PDF Tools
+# PDF Tools — Full Browser PDF Editor
 
-Browser-based PDF editor inspired by iLovePDF — **all tools from the product screenshots**, running locally in your browser.
+Free, full-featured PDF suite inspired by iLovePDF. **All processing runs in your browser** — files are not uploaded to a server.
 
-**Repo:** https://github.com/ktiwari54/PDF
+**GitHub:** https://github.com/ktiwari54/PDF  
+**Live (after Pages enabled):** https://ktiwari54.github.io/PDF/
 
-## Features
+## Tools (33)
 
 ### Organize PDF
-- Merge PDF · Split PDF · Remove pages · Extract pages · Organize PDF · Scan to PDF
+Merge · Split · Remove pages · Extract pages · Organize (reorder) · Scan to PDF
 
 ### Optimize PDF
-- Compress PDF · Repair PDF · OCR PDF
+Compress (real JPEG re-encode) · Repair · OCR (Tesseract)
 
 ### Convert to PDF
-- JPG to PDF · Word to PDF · PowerPoint to PDF · Excel to PDF · HTML to PDF
+JPG/PNG → PDF · Word → PDF · PowerPoint → PDF · Excel → PDF · HTML → PDF
 
 ### Convert from PDF
-- PDF to JPG · PDF to Word · PDF to PowerPoint · PDF to Excel · PDF to PDF/A
+PDF → JPG · PDF → Word · PDF → PowerPoint · PDF → Excel · PDF → PDF/A
 
 ### Edit PDF
-- Rotate PDF · Add page numbers · Add watermark · Crop PDF · Edit PDF · PDF Forms
+Rotate · Page numbers · Watermark · Crop · Edit text · PDF Forms
 
-### PDF Security
-- Unlock PDF · Protect PDF · Sign PDF · Redact PDF · Compare PDF
+### Security
+Unlock · Protect (password) · Sign (draw signature) · Redact · Compare side-by-side
 
-### PDF Intelligence
-- AI Summarizer · Translate PDF · PDF to Markdown
+### Intelligence
+AI Summarizer (extractive) · Translate · PDF → Markdown
 
-> Processing is **client-side**. Files stay on your device (except OCR language model download from the CDN).
-
-## Quick start
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the URL Vite prints (usually http://localhost:5173).
+Open http://localhost:5173
 
 ```bash
 npm run build
 npm run preview
 ```
 
+## Enable GitHub Pages
+
+1. Repo **Settings → Pages**
+2. Source: **GitHub Actions**
+3. Push to `main` (workflow deploys automatically)
+
 ## Stack
 
-- React + TypeScript + Vite
-- `pdf-lib` · `pdfjs-dist` · `jspdf` · `jszip`
-- `mammoth` (Word) · `xlsx` (Excel) · `tesseract.js` (OCR)
+- React 19 + TypeScript + Vite
+- `@cantoo/pdf-lib` · `pdfjs-dist` · `jspdf` · `jszip`
+- `mammoth` · `xlsx` · `tesseract.js` · `html2canvas`
 
-## Notes
+## Privacy
 
-- **Protect / Unlock** password encryption support depends on pdf-lib capabilities; complex DRM may not apply.
-- **Office conversions** are best-effort in the browser (text/layout approximations).
-- **AI Translate** uses the browser Translator API when available; otherwise exports a marked text PDF.
-- **OCR** downloads English trained data on first use.
+Files stay on your machine. OCR may download language data from a CDN on first use. Translation may call a public API when available.
 
 ## License
 

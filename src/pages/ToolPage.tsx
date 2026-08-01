@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getTool } from '../data/tools'
 import { ToolIcon } from '../components/ToolIcon'
@@ -26,39 +26,92 @@ export function ToolPage() {
   } | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [textOut, setTextOut] = useState<string | null>(null)
+  const [pageCount, setPageCount] = useState(0)
+  const [thumbs, setThumbs] = useState<string[]>([])
+  const [selectedPages, setSelectedPages] = useState<number[]>([])
+  const [pageOrder, setPageOrder] = useState<number[]>([])
 
-  // Options
-  const [pageRange, setPageRange] = useState('1')
+  const [pageRange, setPageRange] = useState('')
   const [rotateAngle, setRotateAngle] = useState<90 | 180 | 270>(90)
   const [watermark, setWatermark] = useState('CONFIDENTIAL')
   const [cropMargin, setCropMargin] = useState(36)
   const [password, setPassword] = useState('')
-  const [editText, setEditText] = useState('Hello from PDF Tools')
-  const [pageOrder, setPageOrder] = useState('')
+  const [editText, setEditText] = useState('Annotated with PDF Tools')
   const [numberPos, setNumberPos] = useState<
     'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center'
   >('bottom-center')
   const [targetLang, setTargetLang] = useState('es')
-  const [htmlPaste, setHtmlPaste] = useState('<h1>Hello</h1><p>Paste HTML here</p>')
+  const [htmlPaste, setHtmlPaste] = useState(
+    '<h1>Hello</h1><p>Paste HTML content here to convert to PDF.</p>',
+  )
+  const [compressQuality, setCompressQuality] = useState<
+    'low' | 'medium' | 'high'
+  >('medium')
+  const [splitMode, setSplitMode] = useState<'all' | 'range'>('all')
 
   const accept = tool?.accept ?? 'application/pdf'
+  const needsThumbs = [
+    'remove-pages',
+    'extract-pages',
+    'organize-pdf',
+    'rotate-pdf',
+    'split-pdf',
+  ].includes(tool?.id || '')
 
   const onFiles = useCallback(
-    (list: FileList | File[]) => {
-      const arr = Array.from(list)
+    async (list: FileList | File[]) => {
       if (!tool) return
-      setFiles(tool.multiple ? arr : arr.slice(0, 1))
+      const arr = Array.from(list)
+      const next = tool.multiple ? arr : arr.slice(0, 1)
+      setFiles(next)
       setStatus(null)
       setPreview(null)
       setTextOut(null)
+      setThumbs([])
+      setSelectedPages([])
+      setPageOrder([])
+      setPageCount(0)
+
+      const first = next[0]
+      if (
+        first &&
+        (first.type === 'application/pdf' ||
+          first.name.toLowerCase().endsWith('.pdf'))
+      ) {
+        try {
+          const count = await ops.getPageCount(first)
+          setPageCount(count)
+          setPageOrder(Array.from({ length: count }, (_, i) => i + 1))
+          if (needsThumbs) {
+            setStatus({ type: 'info', msg: 'Generating page previews…' })
+            const t = await ops.renderAllThumbnails(first)
+            setThumbs(t)
+            setStatus(null)
+          } else {
+            const url = await ops.renderPreview(first, 0)
+            setPreview(url)
+          }
+        } catch {
+          /* ignore preview errors */
+        }
+      }
     },
-    [tool],
+    [tool, needsThumbs],
   )
+
+  useEffect(() => {
+    setFiles([])
+    setThumbs([])
+    setSelectedPages([])
+    setStatus(null)
+    setPreview(null)
+    setTextOut(null)
+  }, [toolId])
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDrag(false)
-    if (e.dataTransfer.files?.length) onFiles(e.dataTransfer.files)
+    if (e.dataTransfer.files?.length) void onFiles(e.dataTransfer.files)
   }
 
   const canRun = useMemo(() => {
@@ -68,11 +121,34 @@ export function ToolPage() {
     return files.length >= min
   }, [tool, files, htmlPaste])
 
+  function togglePage(p: number) {
+    setSelectedPages((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p].sort((a, b) => a - b),
+    )
+  }
+
+  function moveOrder(index: number, dir: -1 | 1) {
+    setPageOrder((prev) => {
+      const next = [...prev]
+      const j = index + dir
+      if (j < 0 || j >= next.length) return prev
+      ;[next[index], next[j]] = [next[j], next[index]]
+      return next
+    })
+  }
+
+  function pagesForAction(): number[] {
+    if (selectedPages.length) return selectedPages
+    if (pageRange.trim() && pageCount) {
+      return ops.parsePageSpec(pageRange, pageCount)
+    }
+    return []
+  }
+
   async function run() {
     if (!tool) return
     setBusy(true)
-    setStatus({ type: 'info', msg: 'Processing… this may take a moment.' })
-    setPreview(null)
+    setStatus({ type: 'info', msg: 'Processing… please wait.' })
     setTextOut(null)
     try {
       const f = files[0]
@@ -83,43 +159,47 @@ export function ToolPage() {
           break
         }
         case 'split-pdf': {
-          const zip = await ops.splitPdf(f)
+          const zip = await ops.splitPdf(
+            f,
+            splitMode,
+            splitMode === 'range' ? pageRange || selectedPages.join(',') : undefined,
+          )
           ops.downloadBlob(zip, `${ops.baseName(f.name)}_split.zip`)
           break
         }
         case 'remove-pages': {
-          const pages = parsePages(pageRange)
+          const pages = pagesForAction()
           const bytes = await ops.removePages(f, pages)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_removed.pdf`)
           break
         }
         case 'extract-pages': {
-          const pages = parsePages(pageRange)
+          const pages = pagesForAction()
           const bytes = await ops.extractPages(f, pages)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_extracted.pdf`)
           break
         }
         case 'organize-pdf': {
-          const order = pageOrder
-            ? parsePages(pageOrder)
-            : Array.from(
-                { length: await ops.getPageCount(f) },
-                (_, i) => i + 1,
-              ).reverse()
-          const bytes = await ops.organizePages(f, order)
+          const bytes = await ops.organizePages(f, pageOrder)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_organized.pdf`)
           break
         }
         case 'scan-to-pdf':
         case 'jpg-to-pdf': {
-          const bytes = await ops.imagesToPdf(files)
+          const bytes = await ops.imagesToPdf(files, { pageSize: 'a4', margin: 24 })
           ops.downloadBytes(bytes, 'images.pdf')
           break
         }
         case 'compress-pdf': {
-          const bytes = await ops.compressPdf(f)
+          const before = f.size
+          const bytes = await ops.compressPdf(f, compressQuality)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_compressed.pdf`)
-          break
+          setStatus({
+            type: 'success',
+            msg: `Done! ${formatSize(before)} → ${formatSize(bytes.length)}`,
+          })
+          setBusy(false)
+          return
         }
         case 'repair-pdf': {
           const bytes = await ops.repairPdf(f)
@@ -127,8 +207,9 @@ export function ToolPage() {
           break
         }
         case 'ocr-pdf': {
-          setStatus({ type: 'info', msg: 'Running OCR (first time downloads language data)…' })
-          const { text, pdf } = await ops.ocrToPdf(f)
+          const { text, pdf } = await ops.ocrToPdf(f, (msg) =>
+            setStatus({ type: 'info', msg }),
+          )
           setTextOut(text)
           ops.downloadBytes(pdf, `${ops.baseName(f.name)}_ocr.pdf`)
           break
@@ -167,7 +248,7 @@ export function ToolPage() {
         }
         case 'pdf-to-powerpoint': {
           const blob = await ops.pdfToPowerpoint(f)
-          ops.downloadBlob(blob, `${ops.baseName(f.name)}.ppt.html`)
+          ops.downloadBlob(blob, `${ops.baseName(f.name)}_slides.html`)
           break
         }
         case 'pdf-to-excel': {
@@ -181,20 +262,22 @@ export function ToolPage() {
           break
         }
         case 'rotate-pdf': {
-          // support multiple
-          if (files.length === 1) {
-            const bytes = await ops.rotatePdf(f, rotateAngle)
-            ops.downloadBytes(bytes, `${ops.baseName(f.name)}_rotated.pdf`)
-          } else {
-            for (const file of files) {
-              const bytes = await ops.rotatePdf(file, rotateAngle)
-              ops.downloadBytes(bytes, `${ops.baseName(file.name)}_rotated.pdf`)
-            }
+          const pages = pagesForAction()
+          for (const file of files) {
+            const bytes = await ops.rotatePdf(
+              file,
+              rotateAngle,
+              pages.length ? pages : undefined,
+            )
+            ops.downloadBytes(bytes, `${ops.baseName(file.name)}_rotated.pdf`)
           }
           break
         }
         case 'page-numbers': {
-          const bytes = await ops.addPageNumbers(f, { position: numberPos })
+          const bytes = await ops.addPageNumbers(f, {
+            position: numberPos,
+            format: '{n} / {total}',
+          })
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_numbered.pdf`)
           break
         }
@@ -211,17 +294,20 @@ export function ToolPage() {
         case 'edit-pdf': {
           const bytes = await ops.editAddText(f, editText)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_edited.pdf`)
-          const url = await ops.renderPreview(
-            new File([bytes], 'edited.pdf', { type: 'application/pdf' }),
+          setPreview(
+            await ops.renderPreview(
+              new File([bytes], 'x.pdf', { type: 'application/pdf' }),
+            ),
           )
-          setPreview(url)
           break
         }
         case 'pdf-forms': {
           const fields = await ops.listFormFields(f)
-          if (fields.length) {
-            setTextOut(`Existing form fields:\n${fields.join('\n')}`)
-          }
+          setTextOut(
+            fields.length
+              ? `Existing form fields:\n${fields.join('\n')}`
+              : 'No form fields found. Adding sample Name / Email / Agree fields…',
+          )
           const bytes = await ops.addSampleFormFields(f)
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_form.pdf`)
           break
@@ -232,14 +318,35 @@ export function ToolPage() {
           break
         }
         case 'protect-pdf': {
-          if (!password) throw new Error('Enter a password to protect the PDF.')
           const bytes = await ops.protectPdf(f, password)
-          ops.downloadBytes(bytes, `${ops.baseName(f.name)}_protected.pdf`)
+          const isLocked =
+            bytes[0] === 'P'.charCodeAt(0) &&
+            bytes[1] === 'D'.charCodeAt(0) &&
+            bytes[2] === 'F'.charCodeAt(0) &&
+            bytes[3] === 'T'.charCodeAt(0)
+          ops.downloadBytes(
+            bytes,
+            isLocked
+              ? `${ops.baseName(f.name)}.locked.pdf`
+              : `${ops.baseName(f.name)}_protected.pdf`,
+            isLocked ? 'application/octet-stream' : 'application/pdf',
+          )
           break
         }
         case 'sign-pdf': {
           const canvas = sigCanvasRef.current
           if (!canvas) throw new Error('Signature pad missing')
+          // ensure non-empty signature
+          const ctx = canvas.getContext('2d')!
+          const sample = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+          let painted = false
+          for (let i = 3; i < sample.length; i += 4) {
+            if (sample[i] > 0) {
+              painted = true
+              break
+            }
+          }
+          if (!painted) throw new Error('Draw your signature first.')
           const dataUrl = canvas.toDataURL('image/png')
           const res = await fetch(dataUrl)
           const buf = new Uint8Array(await res.arrayBuffer())
@@ -254,22 +361,26 @@ export function ToolPage() {
         }
         case 'compare-pdf': {
           if (files.length < 2) throw new Error('Upload two PDFs to compare.')
-          const a = await ops.renderPreview(files[0], 0)
-          const b = await ops.renderPreview(files[1], 0)
-          setPreview(a)
-          setTextOut('Second document preview below (open both downloads).')
-          // also show second via textOut + create side image
+          const a = await ops.renderPreview(files[0], 0, 1.2)
+          const b = await ops.renderPreview(files[1], 0, 1.2)
           const imgA = await loadImg(a)
           const imgB = await loadImg(b)
           const c = document.createElement('canvas')
-          c.width = imgA.width + imgB.width + 20
-          c.height = Math.max(imgA.height, imgB.height)
+          c.width = imgA.width + imgB.width + 24
+          c.height = Math.max(imgA.height, imgB.height) + 40
           const ctx = c.getContext('2d')!
-          ctx.fillStyle = '#eee'
+          ctx.fillStyle = '#f3f4f6'
           ctx.fillRect(0, 0, c.width, c.height)
-          ctx.drawImage(imgA, 0, 0)
-          ctx.drawImage(imgB, imgA.width + 20, 0)
+          ctx.fillStyle = '#111'
+          ctx.font = 'bold 16px sans-serif'
+          ctx.fillText(files[0].name, 8, 24)
+          ctx.fillText(files[1].name, imgA.width + 32, 24)
+          ctx.drawImage(imgA, 0, 36)
+          ctx.drawImage(imgB, imgA.width + 24, 36)
           setPreview(c.toDataURL('image/jpeg', 0.9))
+          setTextOut(
+            `Compared page 1 of each file.\nA: ${files[0].name} (${formatSize(files[0].size)})\nB: ${files[1].name} (${formatSize(files[1].size)})`,
+          )
           break
         }
         case 'ai-summarizer': {
@@ -277,17 +388,18 @@ export function ToolPage() {
           const summary = ops.summarizeText(text)
           setTextOut(summary)
           const pdf = await ops.htmlStringToPdf(
-            `<h1>Summary</h1><p>${summary}</p>`,
+            `<h1>Summary — ${ops.baseName(f.name)}</h1><p style="font-size:14px;line-height:1.6">${summary}</p>`,
           )
           ops.downloadBytes(pdf, `${ops.baseName(f.name)}_summary.pdf`)
           break
         }
         case 'translate-pdf': {
+          setStatus({ type: 'info', msg: 'Translating text…' })
           const text = await ops.extractText(f)
           const translated = await ops.translateText(text, targetLang)
           setTextOut(translated)
           const pdf = await ops.htmlStringToPdf(
-            `<h1>Translation (${targetLang})</h1><pre style="white-space:pre-wrap">${translated}</pre>`,
+            `<h1>Translation (${targetLang})</h1><pre style="white-space:pre-wrap;font-family:Arial">${translated}</pre>`,
           )
           ops.downloadBytes(pdf, `${ops.baseName(f.name)}_${targetLang}.pdf`)
           break
@@ -304,7 +416,10 @@ export function ToolPage() {
         default:
           throw new Error('Tool not implemented')
       }
-      setStatus({ type: 'success', msg: 'Done! Your download should start automatically.' })
+      setStatus({
+        type: 'success',
+        msg: 'Done! Your download should start automatically.',
+      })
     } catch (err) {
       console.error(err)
       setStatus({
@@ -350,8 +465,12 @@ export function ToolPage() {
           onClick={() => inputRef.current?.click()}
         >
           <div style={{ fontSize: '2rem' }}>📄</div>
-          <h2>Select PDF files</h2>
-          <p>or drop {tool.multiple ? 'files' : 'a file'} here</p>
+          <h2>
+            {tool.accept.includes('image')
+              ? 'Select image files'
+              : 'Select PDF files'}
+          </h2>
+          <p>or drop {tool.multiple ? 'files' : 'a file'} here — processed in your browser</p>
           <div style={{ marginTop: '1rem' }}>
             <button
               type="button"
@@ -370,7 +489,7 @@ export function ToolPage() {
             accept={accept}
             multiple={tool.multiple}
             hidden
-            onChange={(e) => e.target.files && onFiles(e.target.files)}
+            onChange={(e) => e.target.files && void onFiles(e.target.files)}
           />
         </div>
 
@@ -379,19 +498,97 @@ export function ToolPage() {
             {files.map((file, i) => (
               <div className="file-row" key={`${file.name}-${i}`}>
                 <span className="name">{file.name}</span>
-                <span className="size">{formatSize(file.size)}</span>
+                <span className="size">
+                  {formatSize(file.size)}
+                  {i === 0 && pageCount > 0 ? ` · ${pageCount} pages` : ''}
+                </span>
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
-                  onClick={() =>
-                    setFiles((prev) => prev.filter((_, j) => j !== i))
-                  }
+                  onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
                 >
                   Remove
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {thumbs.length > 0 && tool.id !== 'organize-pdf' && (
+          <div className="thumb-grid">
+            <div className="thumb-grid-head">
+              <strong>Pages</strong>
+              <span className="muted">Click to select · {selectedPages.length} selected</span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                onClick={() =>
+                  setSelectedPages(
+                    selectedPages.length === pageCount
+                      ? []
+                      : Array.from({ length: pageCount }, (_, i) => i + 1),
+                  )
+                }
+              >
+                {selectedPages.length === pageCount ? 'Clear all' : 'Select all'}
+              </button>
+            </div>
+            <div className="thumbs">
+              {thumbs.map((src, i) => {
+                const p = i + 1
+                const on = selectedPages.includes(p)
+                return (
+                  <button
+                    type="button"
+                    key={p}
+                    className={`thumb ${on ? 'selected' : ''}`}
+                    onClick={() => togglePage(p)}
+                  >
+                    <img src={src} alt={`Page ${p}`} />
+                    <span>{p}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {thumbs.length > 0 && tool.id === 'organize-pdf' && (
+          <div className="thumb-grid">
+            <div className="thumb-grid-head">
+              <strong>Reorder pages</strong>
+              <span className="muted">Use arrows to move pages</span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                onClick={() =>
+                  setPageOrder((o) => [...o].reverse())
+                }
+              >
+                Reverse all
+              </button>
+            </div>
+            <div className="thumbs">
+              {pageOrder.map((pageNum, index) => (
+                <div key={`${pageNum}-${index}`} className="thumb organize">
+                  <img src={thumbs[pageNum - 1]} alt={`Page ${pageNum}`} />
+                  <span>
+                    #{index + 1} (was {pageNum})
+                  </span>
+                  <div className="thumb-actions">
+                    <button type="button" onClick={() => moveOrder(index, -1)}>
+                      ↑
+                    </button>
+                    <button type="button" onClick={() => moveOrder(index, 1)}>
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -409,14 +606,16 @@ export function ToolPage() {
           setPassword={setPassword}
           editText={editText}
           setEditText={setEditText}
-          pageOrder={pageOrder}
-          setPageOrder={setPageOrder}
           numberPos={numberPos}
           setNumberPos={setNumberPos}
           targetLang={targetLang}
           setTargetLang={setTargetLang}
           htmlPaste={htmlPaste}
           setHtmlPaste={setHtmlPaste}
+          compressQuality={compressQuality}
+          setCompressQuality={setCompressQuality}
+          splitMode={splitMode}
+          setSplitMode={setSplitMode}
           sigCanvasRef={sigCanvasRef}
           drawing={drawing}
         />
@@ -426,7 +625,7 @@ export function ToolPage() {
             type="button"
             className="btn btn-primary"
             disabled={!canRun || busy}
-            onClick={run}
+            onClick={() => void run()}
           >
             {busy ? 'Working…' : tool.name}
           </button>
@@ -440,6 +639,8 @@ export function ToolPage() {
                 setStatus(null)
                 setPreview(null)
                 setTextOut(null)
+                setThumbs([])
+                setSelectedPages([])
               }}
             >
               Clear
@@ -453,31 +654,19 @@ export function ToolPage() {
             <div className="result-text">{textOut}</div>
           </div>
         )}
-        {preview && (
+        {preview && !thumbs.length && (
           <div className="preview-box">
             <img src={preview} alt="Preview" />
+          </div>
+        )}
+        {preview && tool.id === 'compare-pdf' && (
+          <div className="preview-box">
+            <img src={preview} alt="Comparison" />
           </div>
         )}
       </div>
     </div>
   )
-}
-
-function parsePages(input: string): number[] {
-  const out = new Set<number>()
-  for (const part of input.split(',')) {
-    const p = part.trim()
-    if (!p) continue
-    if (p.includes('-')) {
-      const [a, b] = p.split('-').map((x) => parseInt(x.trim(), 10))
-      if (!Number.isFinite(a) || !Number.isFinite(b)) continue
-      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) out.add(i)
-    } else {
-      const n = parseInt(p, 10)
-      if (Number.isFinite(n)) out.add(n)
-    }
-  }
-  return [...out].sort((a, b) => a - b)
 }
 
 function loadImg(src: string): Promise<HTMLImageElement> {
@@ -503,8 +692,6 @@ function Options(props: {
   setPassword: (v: string) => void
   editText: string
   setEditText: (v: string) => void
-  pageOrder: string
-  setPageOrder: (v: string) => void
   numberPos: 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center'
   setNumberPos: (
     v: 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center',
@@ -513,26 +700,30 @@ function Options(props: {
   setTargetLang: (v: string) => void
   htmlPaste: string
   setHtmlPaste: (v: string) => void
+  compressQuality: 'low' | 'medium' | 'high'
+  setCompressQuality: (v: 'low' | 'medium' | 'high') => void
+  splitMode: 'all' | 'range'
+  setSplitMode: (v: 'all' | 'range') => void
   sigCanvasRef: React.RefObject<HTMLCanvasElement | null>
   drawing: React.MutableRefObject<boolean>
 }) {
   const id = props.toolId
-  const show =
-    [
-      'remove-pages',
-      'extract-pages',
-      'organize-pdf',
-      'rotate-pdf',
-      'watermark',
-      'crop-pdf',
-      'page-numbers',
-      'protect-pdf',
-      'unlock-pdf',
-      'edit-pdf',
-      'sign-pdf',
-      'translate-pdf',
-      'html-to-pdf',
-    ].includes(id)
+  const show = [
+    'remove-pages',
+    'extract-pages',
+    'split-pdf',
+    'rotate-pdf',
+    'watermark',
+    'crop-pdf',
+    'page-numbers',
+    'protect-pdf',
+    'unlock-pdf',
+    'edit-pdf',
+    'sign-pdf',
+    'translate-pdf',
+    'html-to-pdf',
+    'compress-pdf',
+  ].includes(id)
 
   if (!show) return null
 
@@ -542,8 +733,9 @@ function Options(props: {
     props.drawing.current = true
     const ctx = canvas.getContext('2d')!
     ctx.strokeStyle = '#111'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 2.5
     ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
     const pt = getPt(e, canvas)
     ctx.beginPath()
     ctx.moveTo(pt.x, pt.y)
@@ -565,7 +757,7 @@ function Options(props: {
     <div className="options-panel">
       {(id === 'remove-pages' || id === 'extract-pages') && (
         <label>
-          Pages (e.g. 1,3,5-7)
+          Pages (optional if you click thumbnails) — e.g. 1,3,5-7
           <input
             value={props.pageRange}
             onChange={(e) => props.setPageRange(e.target.value)}
@@ -573,28 +765,61 @@ function Options(props: {
           />
         </label>
       )}
-      {id === 'organize-pdf' && (
+      {id === 'split-pdf' && (
+        <>
+          <label>
+            Split mode
+            <select
+              value={props.splitMode}
+              onChange={(e) =>
+                props.setSplitMode(e.target.value as 'all' | 'range')
+              }
+            >
+              <option value="all">Every page as separate PDF</option>
+              <option value="range">Custom ranges (use ; between parts)</option>
+            </select>
+          </label>
+          {props.splitMode === 'range' && (
+            <label>
+              Ranges — e.g. 1-3;4-6;7
+              <input
+                value={props.pageRange}
+                onChange={(e) => props.setPageRange(e.target.value)}
+                placeholder="1-2;3-5"
+              />
+            </label>
+          )}
+        </>
+      )}
+      {id === 'compress-pdf' && (
         <label>
-          New page order (1-based, e.g. 3,1,2). Leave empty to reverse.
-          <input
-            value={props.pageOrder}
-            onChange={(e) => props.setPageOrder(e.target.value)}
-            placeholder="3,1,2"
-          />
+          Compression quality
+          <select
+            value={props.compressQuality}
+            onChange={(e) =>
+              props.setCompressQuality(
+                e.target.value as 'low' | 'medium' | 'high',
+              )
+            }
+          >
+            <option value="low">Low (smallest file)</option>
+            <option value="medium">Medium (balanced)</option>
+            <option value="high">High (best quality)</option>
+          </select>
         </label>
       )}
       {id === 'rotate-pdf' && (
         <label>
-          Angle
+          Angle (applies to selected pages, or all if none selected)
           <select
             value={props.rotateAngle}
             onChange={(e) =>
               props.setRotateAngle(Number(e.target.value) as 90 | 180 | 270)
             }
           >
-            <option value={90}>90°</option>
+            <option value={90}>90° clockwise</option>
             <option value={180}>180°</option>
-            <option value={270}>270°</option>
+            <option value={270}>270° clockwise</option>
           </select>
         </label>
       )}
@@ -624,9 +849,7 @@ function Options(props: {
           <select
             value={props.numberPos}
             onChange={(e) =>
-              props.setNumberPos(
-                e.target.value as typeof props.numberPos,
-              )
+              props.setNumberPos(e.target.value as typeof props.numberPos)
             }
           >
             <option value="bottom-center">Bottom center</option>
@@ -644,14 +867,16 @@ function Options(props: {
             value={props.password}
             onChange={(e) => props.setPassword(e.target.value)}
             placeholder={
-              id === 'protect-pdf' ? 'Set password' : 'Current password (if any)'
+              id === 'protect-pdf'
+                ? 'Set password'
+                : 'Password (if encrypted)'
             }
           />
         </label>
       )}
       {id === 'edit-pdf' && (
         <label>
-          Text to add (first page)
+          Text to add on first page
           <input
             value={props.editText}
             onChange={(e) => props.setEditText(e.target.value)}
@@ -671,14 +896,16 @@ function Options(props: {
             <option value="hi">Hindi</option>
             <option value="ar">Arabic</option>
             <option value="zh">Chinese</option>
+            <option value="pt">Portuguese</option>
+            <option value="ja">Japanese</option>
           </select>
         </label>
       )}
       {id === 'html-to-pdf' && (
         <label>
-          Or paste HTML
+          Or paste HTML (no file required)
           <textarea
-            rows={5}
+            rows={6}
             value={props.htmlPaste}
             onChange={(e) => props.setHtmlPaste(e.target.value)}
           />
@@ -709,8 +936,7 @@ function Options(props: {
               onClick={() => {
                 const c = props.sigCanvasRef.current
                 if (!c) return
-                const ctx = c.getContext('2d')!
-                ctx.clearRect(0, 0, c.width, c.height)
+                c.getContext('2d')!.clearRect(0, 0, c.width, c.height)
               }}
             >
               Clear signature
