@@ -297,14 +297,15 @@ export const tools: ToolDef[] = [
   },
   {
     id: 'edit-pdf',
-    name: 'Edit PDF',
+    name: 'Live Edit PDF',
     description:
-      'Add text, images, shapes or freehand annotations to a PDF document. Edit size, font, and color.',
+      'Non-destructive live editor. Keeps original fonts & layout; ink mode for handwritten/scanned PDFs.',
     category: 'edit',
     color: '#c084fc',
     icon: 'edit',
     accept: 'application/pdf',
     multiple: false,
+    badge: 'Live',
   },
   {
     id: 'pdf-forms',

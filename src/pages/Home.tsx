@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   tools,
   categoryMeta,
@@ -40,9 +41,14 @@ export function Home() {
           Forge PDFs with <span>dragon power</span>
         </h1>
         <p>
-          Merge, split, compress, convert, sign, and protect — a dark-mode
-          toolkit that runs entirely in your browser.
+          Live-edit without breaking fonts or layout. Merge, compress, convert,
+          and protect — private, in your browser.
         </p>
+        <div style={{ marginTop: '1.1rem' }}>
+          <Link to="/editor" className="btn btn-primary">
+            Open Live Editor
+          </Link>
+        </div>
         <div className="search-bar">
           <Search size={18} />
           <input
