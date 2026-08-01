@@ -1,20 +1,28 @@
 /**
  * Non-destructive PDF export for dragonPDF Live Editor.
- * Original page content streams, fonts, and images stay intact.
- * Only NEW annotations are drawn as overlay content on top.
+ * Original page content stays intact; replacements cover glyphs and redraw text
+ * with the closest matching standard font to the PDF’s original typeface.
  */
 import {
   PDFDocument,
   rgb,
-  StandardFonts,
   degrees,
   LineCapStyle,
 } from '@cantoo/pdf-lib'
 import type { Annotation, PageMeta } from '../types/annotations'
+import { clearFontCache, embedMatchedFont } from './fontMatch'
 
 function hexToRgb(hex: string) {
   const h = hex.replace('#', '')
-  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16)
+  const n = parseInt(
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h,
+    16,
+  )
   return {
     r: ((n >> 16) & 255) / 255,
     g: ((n >> 8) & 255) / 255,
@@ -22,7 +30,6 @@ function hexToRgb(hex: string) {
   }
 }
 
-/** Convert screen/top-left normalized coords (0–1) to PDF bottom-left points */
 function toPdfBox(
   pageW: number,
   pageH: number,
@@ -44,16 +51,12 @@ export async function exportEditedPdf(
   annotations: Annotation[],
   pageMetas: PageMeta[],
 ): Promise<Uint8Array> {
-  // Load original — preserve structure, fonts, images, forms
+  clearFontCache()
   const doc = await PDFDocument.load(originalBytes, {
     ignoreEncryption: true,
     updateMetadata: false,
   })
 
-  const font = await doc.embedFont(StandardFonts.Helvetica)
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold)
-
-  // Group annotations by page index
   const byPage = new Map<number, Annotation[]>()
   for (const a of annotations) {
     const list = byPage.get(a.page) || []
@@ -66,35 +69,82 @@ export async function exportEditedPdf(
   for (const [pageIndex, anns] of byPage) {
     const page = pages[pageIndex]
     if (!page) continue
-    const { width: pageW, height: pageH } = page.getSize()
-    const meta = pageMetas[pageIndex]
-    // Prefer live page size from original PDF (structure source of truth)
-    const W = pageW
-    const H = pageH
-    void meta
+    const { width: W, height: H } = page.getSize()
+    void pageMetas
+
+    // Covers first (so text draws above)
+    for (const ann of anns) {
+      if (ann.type === 'cover') {
+        const box = toPdfBox(W, H, ann.x, ann.y, ann.w, ann.h)
+        const color = hexToRgb(ann.color || '#ffffff')
+        page.drawRectangle({
+          x: box.x,
+          y: box.y,
+          width: Math.max(box.w, 1),
+          height: Math.max(box.h, 1),
+          color: rgb(color.r, color.g, color.b),
+          borderWidth: 0,
+        })
+      }
+      if (ann.type === 'text' && ann.coverOriginal && ann.w && ann.h) {
+        // Slight padding so original glyphs don't peek through
+        const padX = 0.002
+        const padY = 0.001
+        const box = toPdfBox(
+          W,
+          H,
+          Math.max(0, ann.x - padX),
+          Math.max(0, ann.y - padY),
+          ann.w + padX * 2,
+          ann.h + padY * 2,
+        )
+        page.drawRectangle({
+          x: box.x,
+          y: box.y,
+          width: Math.max(box.w, 1),
+          height: Math.max(box.h, 1),
+          color: rgb(1, 1, 1),
+          borderWidth: 0,
+        })
+      }
+    }
 
     for (const ann of anns) {
       if (ann.type === 'text') {
         const color = hexToRgb(ann.color || '#111827')
-        // Size is in points relative to page height for consistency
-        const size = Math.max(8, Math.min(72, ann.fontSize || 14))
+        const size = Math.max(6, Math.min(96, ann.fontSize || 12))
+        const font = await embedMatchedFont(
+          doc,
+          ann.fontName || (ann.bold ? 'Helvetica-Bold' : 'Helvetica'),
+        )
         const x = ann.x * W
-        // y is top-left normalized; baseline sits slightly below top
-        const y = H - ann.y * H - size
-        const f = ann.bold ? fontBold : font
-        // Word-wrap for long lines
-        const maxWidth = (ann.maxWidth ?? 0.9) * W
-        const lines = wrapText(ann.text, f, size, maxWidth)
+        // baseline: top of box + ~80% of font size (PDF baseline)
+        const top = ann.y * H
+        const y = H - top - size * 0.85
+        const maxWidth = ann.w ? ann.w * W : (ann.maxWidth ?? 0.9) * W
+        const lines = wrapText(ann.text, font, size, maxWidth)
         lines.forEach((line, i) => {
-          page.drawText(line, {
-            x,
-            y: y - i * size * 1.25,
-            size,
-            font: f,
-            color: rgb(color.r, color.g, color.b),
-            opacity: ann.opacity ?? 1,
-            rotate: degrees(ann.rotate || 0),
-          })
+          try {
+            page.drawText(line, {
+              x,
+              y: y - i * size * 1.15,
+              size,
+              font,
+              color: rgb(color.r, color.g, color.b),
+              opacity: ann.opacity ?? 1,
+              rotate: degrees(ann.rotate || 0),
+            })
+          } catch {
+            // skip glyphs missing from standard font
+            const safe = line.replace(/[^\x20-\x7E]/g, '?')
+            page.drawText(safe, {
+              x,
+              y: y - i * size * 1.15,
+              size,
+              font,
+              color: rgb(color.r, color.g, color.b),
+            })
+          }
         })
       } else if (ann.type === 'highlight') {
         const box = toPdfBox(W, H, ann.x, ann.y, ann.w, ann.h)
@@ -123,20 +173,15 @@ export async function exportEditedPdf(
           opacity: ann.opacity ?? (fill ? 0.15 : 1),
         })
       } else if (ann.type === 'ink') {
-        // Handwriting / freehand — draw as path segments (preserves vector strokes)
         if (ann.points.length < 2) continue
         const color = hexToRgb(ann.color || '#1e293b')
         const strokeW = ann.width ?? 2
         for (let i = 1; i < ann.points.length; i++) {
           const a = ann.points[i - 1]
           const b = ann.points[i]
-          const x1 = a.x * W
-          const y1 = H - a.y * H
-          const x2 = b.x * W
-          const y2 = H - b.y * H
           page.drawLine({
-            start: { x: x1, y: y1 },
-            end: { x: x2, y: y2 },
+            start: { x: a.x * W, y: H - a.y * H },
+            end: { x: b.x * W, y: H - b.y * H },
             thickness: strokeW,
             color: rgb(color.r, color.g, color.b),
             opacity: ann.opacity ?? 1,
@@ -146,12 +191,11 @@ export async function exportEditedPdf(
       } else if (ann.type === 'image') {
         const box = toPdfBox(W, H, ann.x, ann.y, ann.w, ann.h)
         const raw = dataUrlToBytes(ann.dataUrl)
-        let img
-        if (ann.dataUrl.includes('image/png') || ann.dataUrl.startsWith('data:image/png')) {
-          img = await doc.embedPng(raw)
-        } else {
-          img = await doc.embedJpg(raw)
-        }
+        const img =
+          ann.dataUrl.includes('image/png') ||
+          ann.dataUrl.startsWith('data:image/png')
+            ? await doc.embedPng(raw)
+            : await doc.embedJpg(raw)
         page.drawImage(img, {
           x: box.x,
           y: box.y,
@@ -159,26 +203,12 @@ export async function exportEditedPdf(
           height: box.h,
           opacity: ann.opacity ?? 1,
         })
-      } else if (ann.type === 'cover') {
-        // White cover used for "replace text" without deleting original glyphs
-        const box = toPdfBox(W, H, ann.x, ann.y, ann.w, ann.h)
-        const color = hexToRgb(ann.color || '#ffffff')
-        page.drawRectangle({
-          x: box.x,
-          y: box.y,
-          width: box.w,
-          height: box.h,
-          color: rgb(color.r, color.g, color.b),
-          borderWidth: 0,
-          opacity: 1,
-        })
       }
     }
   }
 
   doc.setModificationDate(new Date())
   doc.setProducer('dragonPDF Live Editor')
-  // Save without object stream rewrite that could break structure unnecessarily
   return doc.save({ useObjectStreams: false, updateFieldAppearances: false })
 }
 
@@ -198,10 +228,9 @@ function wrapText(
     }
     let current = words[0]
     for (let i = 1; i < words.length; i++) {
-      const test = current + ' ' + words[i]
-      if (font.widthOfTextAtSize(test, size) <= maxWidth) {
-        current = test
-      } else {
+      const test = `${current} ${words[i]}`
+      if (font.widthOfTextAtSize(test, size) <= maxWidth) current = test
+      else {
         lines.push(current)
         current = words[i]
       }
