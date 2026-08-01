@@ -50,6 +50,7 @@ export function ToolPage() {
     'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center'
   >('bottom-center')
   const [targetLang, setTargetLang] = useState('es')
+  const [sourceLang, setSourceLang] = useState('auto')
   const [htmlPaste, setHtmlPaste] = useState(
     '<h1>Hello</h1><p>Paste HTML content here to convert to PDF.</p>',
   )
@@ -421,14 +422,28 @@ export function ToolPage() {
           break
         }
         case 'translate-pdf': {
-          setStatus({ type: 'info', msg: 'Translating text…' })
+          setStatus({ type: 'info', msg: 'Extracting text from PDF…' })
           const text = await ops.extractText(f)
-          const translated = await ops.translateText(text, targetLang)
-          setTextOut(translated)
-          const pdf = await ops.htmlStringToPdf(
-            `<h1>Translation (${targetLang})</h1><pre style="white-space:pre-wrap;font-family:Arial">${translated}</pre>`,
+          if (!text.trim()) {
+            throw new Error(
+              'No extractable text. For scanned PDFs, run OCR PDF first, then Translate.',
+            )
+          }
+          const translated = await ops.translateText(
+            text,
+            targetLang,
+            sourceLang,
+            (msg) => setStatus({ type: 'info', msg }),
           )
-          ops.downloadBytes(pdf, `${ops.baseName(f.name)}_${targetLang}.pdf`)
+          setTextOut(translated)
+          setStatus({ type: 'info', msg: 'Building translated PDF…' })
+          const pdf = await ops.translationToPdf(
+            `Translation — ${ops.baseName(f.name)}`,
+            translated,
+            targetLang,
+          )
+          const safeCode = targetLang.replace(/[^a-zA-Z0-9-]/g, '_')
+          ops.downloadBytes(pdf, `${ops.baseName(f.name)}_${safeCode}.pdf`)
           break
         }
         case 'pdf-to-markdown': {
@@ -647,6 +662,8 @@ export function ToolPage() {
           setNumberPos={setNumberPos}
           targetLang={targetLang}
           setTargetLang={setTargetLang}
+          sourceLang={sourceLang}
+          setSourceLang={setSourceLang}
           htmlPaste={htmlPaste}
           setHtmlPaste={setHtmlPaste}
           compressQuality={compressQuality}
@@ -745,6 +762,8 @@ function Options(props: {
   ) => void
   targetLang: string
   setTargetLang: (v: string) => void
+  sourceLang: string
+  setSourceLang: (v: string) => void
   htmlPaste: string
   setHtmlPaste: (v: string) => void
   compressQuality: 'low' | 'medium' | 'high'
@@ -1008,22 +1027,39 @@ function Options(props: {
         </label>
       )}
       {id === 'translate-pdf' && (
-        <label>
-          Target language
-          <select
-            value={props.targetLang}
-            onChange={(e) => props.setTargetLang(e.target.value)}
-          >
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="de">German</option>
-            <option value="hi">Hindi</option>
-            <option value="ar">Arabic</option>
-            <option value="zh">Chinese</option>
-            <option value="pt">Portuguese</option>
-            <option value="ja">Japanese</option>
-          </select>
-        </label>
+        <>
+          <label>
+            Source language
+            <select
+              value={props.sourceLang}
+              onChange={(e) => props.setSourceLang(e.target.value)}
+            >
+              <option value="auto">Auto-detect</option>
+              {ops.TRANSLATE_LANGUAGES.map((l) => (
+                <option key={`src-${l.code}`} value={l.code}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Target language (all supported)
+            <select
+              value={props.targetLang}
+              onChange={(e) => props.setTargetLang(e.target.value)}
+            >
+              {ops.TRANSLATE_LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.name} ({l.code})
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="muted" style={{ margin: 0 }}>
+            Works online. Scanned PDFs need OCR first. Long documents are
+            translated in chunks.
+          </p>
+        </>
       )}
       {id === 'html-to-pdf' && (
         <label>

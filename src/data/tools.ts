@@ -405,13 +405,13 @@ export const tools: ToolDef[] = [
     id: 'translate-pdf',
     name: 'Translate PDF',
     description:
-      'Easily translate PDF files. Keep fonts, layout, and formatting intact where possible.',
+      'Translate PDF text into 100+ languages. Auto-detect source, download a translated PDF.',
     category: 'intelligence',
     color: '#fb7185',
     icon: 'translate',
     accept: 'application/pdf',
     multiple: false,
-    badge: 'New!',
+    badge: 'Live',
   },
   {
     id: 'pdf-to-markdown',

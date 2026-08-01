@@ -1065,43 +1065,330 @@ export function summarizeText(text: string, maxSentences = 6): string {
     .join(' ')
 }
 
+/** ISO codes supported for Translate PDF (Google Translate client endpoint). */
+export const TRANSLATE_LANGUAGES: { code: string; name: string }[] = [
+  { code: 'af', name: 'Afrikaans' },
+  { code: 'sq', name: 'Albanian' },
+  { code: 'am', name: 'Amharic' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hy', name: 'Armenian' },
+  { code: 'az', name: 'Azerbaijani' },
+  { code: 'eu', name: 'Basque' },
+  { code: 'be', name: 'Belarusian' },
+  { code: 'bn', name: 'Bengali' },
+  { code: 'bs', name: 'Bosnian' },
+  { code: 'bg', name: 'Bulgarian' },
+  { code: 'ca', name: 'Catalan' },
+  { code: 'ceb', name: 'Cebuano' },
+  { code: 'zh-CN', name: 'Chinese (Simplified)' },
+  { code: 'zh-TW', name: 'Chinese (Traditional)' },
+  { code: 'co', name: 'Corsican' },
+  { code: 'hr', name: 'Croatian' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'da', name: 'Danish' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'en', name: 'English' },
+  { code: 'eo', name: 'Esperanto' },
+  { code: 'et', name: 'Estonian' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'fr', name: 'French' },
+  { code: 'fy', name: 'Frisian' },
+  { code: 'gl', name: 'Galician' },
+  { code: 'ka', name: 'Georgian' },
+  { code: 'de', name: 'German' },
+  { code: 'el', name: 'Greek' },
+  { code: 'gu', name: 'Gujarati' },
+  { code: 'ht', name: 'Haitian Creole' },
+  { code: 'ha', name: 'Hausa' },
+  { code: 'haw', name: 'Hawaiian' },
+  { code: 'he', name: 'Hebrew' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'hmn', name: 'Hmong' },
+  { code: 'hu', name: 'Hungarian' },
+  { code: 'is', name: 'Icelandic' },
+  { code: 'ig', name: 'Igbo' },
+  { code: 'id', name: 'Indonesian' },
+  { code: 'ga', name: 'Irish' },
+  { code: 'it', name: 'Italian' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'jv', name: 'Javanese' },
+  { code: 'kn', name: 'Kannada' },
+  { code: 'kk', name: 'Kazakh' },
+  { code: 'km', name: 'Khmer' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ku', name: 'Kurdish' },
+  { code: 'ky', name: 'Kyrgyz' },
+  { code: 'lo', name: 'Lao' },
+  { code: 'la', name: 'Latin' },
+  { code: 'lv', name: 'Latvian' },
+  { code: 'lt', name: 'Lithuanian' },
+  { code: 'lb', name: 'Luxembourgish' },
+  { code: 'mk', name: 'Macedonian' },
+  { code: 'mg', name: 'Malagasy' },
+  { code: 'ms', name: 'Malay' },
+  { code: 'ml', name: 'Malayalam' },
+  { code: 'mt', name: 'Maltese' },
+  { code: 'mi', name: 'Maori' },
+  { code: 'mr', name: 'Marathi' },
+  { code: 'mn', name: 'Mongolian' },
+  { code: 'my', name: 'Myanmar (Burmese)' },
+  { code: 'ne', name: 'Nepali' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'ny', name: 'Nyanja' },
+  { code: 'or', name: 'Odia' },
+  { code: 'ps', name: 'Pashto' },
+  { code: 'fa', name: 'Persian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'pa', name: 'Punjabi' },
+  { code: 'ro', name: 'Romanian' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'sm', name: 'Samoan' },
+  { code: 'gd', name: 'Scots Gaelic' },
+  { code: 'sr', name: 'Serbian' },
+  { code: 'st', name: 'Sesotho' },
+  { code: 'sn', name: 'Shona' },
+  { code: 'sd', name: 'Sindhi' },
+  { code: 'si', name: 'Sinhala' },
+  { code: 'sk', name: 'Slovak' },
+  { code: 'sl', name: 'Slovenian' },
+  { code: 'so', name: 'Somali' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'su', name: 'Sundanese' },
+  { code: 'sw', name: 'Swahili' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'tl', name: 'Tagalog' },
+  { code: 'tg', name: 'Tajik' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'tt', name: 'Tatar' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'th', name: 'Thai' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'tk', name: 'Turkmen' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'ur', name: 'Urdu' },
+  { code: 'ug', name: 'Uyghur' },
+  { code: 'uz', name: 'Uzbek' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'cy', name: 'Welsh' },
+  { code: 'xh', name: 'Xhosa' },
+  { code: 'yi', name: 'Yiddish' },
+  { code: 'yo', name: 'Yoruba' },
+  { code: 'zu', name: 'Zulu' },
+]
+
+const RTL_LANGS = new Set(['ar', 'he', 'fa', 'ur', 'ps', 'yi', 'ug'])
+
+export function isRtlLang(code: string) {
+  return RTL_LANGS.has(code.split('-')[0])
+}
+
+/** Split text into chunks that fit free translate URL limits */
+function chunkText(text: string, maxLen = 900): string[] {
+  const cleaned = text.replace(/\r\n/g, '\n').trim()
+  if (!cleaned) return []
+  if (cleaned.length <= maxLen) return [cleaned]
+
+  const chunks: string[] = []
+  const paragraphs = cleaned.split(/\n{2,}/)
+  let buf = ''
+
+  const flush = () => {
+    if (buf.trim()) chunks.push(buf.trim())
+    buf = ''
+  }
+
+  for (const para of paragraphs) {
+    if (para.length > maxLen) {
+      flush()
+      // Split long paragraph by sentences / spaces
+      let rest = para
+      while (rest.length > maxLen) {
+        let cut = rest.lastIndexOf(' ', maxLen)
+        if (cut < maxLen * 0.5) cut = maxLen
+        chunks.push(rest.slice(0, cut).trim())
+        rest = rest.slice(cut).trim()
+      }
+      if (rest) buf = rest
+      continue
+    }
+    if ((buf + '\n\n' + para).length > maxLen) {
+      flush()
+      buf = para
+    } else {
+      buf = buf ? buf + '\n\n' + para : para
+    }
+  }
+  flush()
+  return chunks
+}
+
+async function translateChunkGoogle(
+  text: string,
+  targetLang: string,
+  sourceLang: string,
+): Promise<string> {
+  const url =
+    'https://translate.googleapis.com/translate_a/single?client=gtx&sl=' +
+    encodeURIComponent(sourceLang) +
+    '&tl=' +
+    encodeURIComponent(targetLang) +
+    '&dt=t&q=' +
+    encodeURIComponent(text)
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Translate HTTP ${res.status}`)
+  const data = (await res.json()) as unknown
+  // Response shape: [ [ [translated, original, ...], ... ], ...]
+  if (!Array.isArray(data) || !Array.isArray(data[0])) {
+    throw new Error('Unexpected translate response')
+  }
+  return (data[0] as unknown[])
+    .map((row) => (Array.isArray(row) ? String(row[0] ?? '') : ''))
+    .join('')
+}
+
+async function translateChunkMyMemory(
+  text: string,
+  targetLang: string,
+  sourceLang: string,
+): Promise<string> {
+  const sl = sourceLang === 'auto' ? 'en' : sourceLang
+  const url =
+    'https://api.mymemory.translated.net/get?q=' +
+    encodeURIComponent(text.slice(0, 450)) +
+    '&langpair=' +
+    encodeURIComponent(`${sl}|${targetLang}`)
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`MyMemory HTTP ${res.status}`)
+  const data = (await res.json()) as {
+    responseData?: { translatedText?: string }
+    responseStatus?: number
+  }
+  const out = data.responseData?.translatedText
+  if (!out || data.responseStatus !== 200) {
+    throw new Error('MyMemory translation failed')
+  }
+  // Filter quota / error messages returned as "translation"
+  if (/MYMEMORY WARNING/i.test(out)) throw new Error(out)
+  return out
+}
+
+/**
+ * Translate text to any language code (e.g. es, hi, ja, zh-CN).
+ * Uses Google Translate free client endpoint with MyMemory fallback.
+ */
 export async function translateText(
   text: string,
   targetLang: string,
+  sourceLang = 'auto',
+  onProgress?: (msg: string) => void,
 ): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any
-  if (w.translation?.createTranslator) {
-    try {
-      const translator = await w.translation.createTranslator({
-        sourceLanguage: 'en',
-        targetLanguage: targetLang,
-      })
-      return await translator.translate(text.slice(0, 8000))
-    } catch {
-      /* fall through */
-    }
+  const trimmed = text.trim()
+  if (!trimmed) {
+    throw new Error(
+      'No extractable text in this PDF. For scans, run OCR PDF first, then Translate.',
+    )
   }
-  // Free LibreTranslate public instance (best-effort)
-  try {
-    const res = await fetch('https://libretranslate.com/translate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        q: text.slice(0, 3000),
-        source: 'auto',
-        target: targetLang,
-        format: 'text',
-      }),
-    })
-    if (res.ok) {
-      const data = (await res.json()) as { translatedText?: string }
-      if (data.translatedText) return data.translatedText
+
+  const tl = targetLang === 'zh' ? 'zh-CN' : targetLang
+  const sl = sourceLang || 'auto'
+  const chunks = chunkText(trimmed, 850)
+  const results: string[] = []
+  let engine: 'google' | 'mymemory' | null = null
+
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.(
+      `Translating chunk ${i + 1} of ${chunks.length} → ${tl}…`,
+    )
+    const chunk = chunks[i]
+    let translated = ''
+
+    // Prefer Google free endpoint (broad language support)
+    if (engine !== 'mymemory') {
+      try {
+        translated = await translateChunkGoogle(chunk, tl, sl)
+        engine = 'google'
+      } catch {
+        engine = engine === 'google' ? 'google' : null
+      }
     }
-  } catch {
-    /* offline / blocked */
+
+    if (!translated) {
+      try {
+        // MyMemory needs smaller pieces
+        const sub = chunkText(chunk, 400)
+        const parts: string[] = []
+        for (const s of sub) {
+          parts.push(await translateChunkMyMemory(s, tl, sl === 'auto' ? 'en' : sl))
+          await delay(120)
+        }
+        translated = parts.join(' ')
+        engine = 'mymemory'
+      } catch (e) {
+        // last resort: browser Translator API (Chromium)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any
+        if (w.translation?.createTranslator) {
+          try {
+            const translator = await w.translation.createTranslator({
+              sourceLanguage: sl === 'auto' ? 'en' : sl,
+              targetLanguage: tl.split('-')[0],
+            })
+            translated = await translator.translate(chunk)
+          } catch {
+            /* fall through */
+          }
+        }
+        if (!translated) {
+          throw new Error(
+            e instanceof Error
+              ? `Translation failed: ${e.message}. Check your network and try again.`
+              : 'Translation failed. Check your network and try again.',
+          )
+        }
+      }
+    }
+
+    results.push(translated)
+    // Be polite to free endpoints
+    if (i < chunks.length - 1) await delay(80)
   }
-  return `[Translation to ${targetLang} unavailable offline]\n\nOriginal:\n\n${text.slice(0, 5000)}`
+
+  onProgress?.(`Done via ${engine || 'browser'} (${results.length} chunk(s)).`)
+  return results.join('\n\n')
+}
+
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+/** Build a readable translated PDF (RTL-aware). */
+export async function translationToPdf(
+  title: string,
+  translated: string,
+  targetLang: string,
+): Promise<Uint8Array> {
+  const rtl = isRtlLang(targetLang)
+  const langName =
+    TRANSLATE_LANGUAGES.find((l) => l.code === targetLang || l.code === targetLang.replace('zh', 'zh-CN'))
+      ?.name || targetLang
+  const paragraphs = translated
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map(
+      (p) =>
+        `<p style="margin:0 0 12px;font-size:13px;line-height:1.65;font-family:'Noto Sans',Arial,'Segoe UI',sans-serif;">${escapeHtml(p)}</p>`,
+    )
+    .join('')
+  const html = `
+    <div dir="${rtl ? 'rtl' : 'ltr'}" style="text-align:${rtl ? 'right' : 'left'}">
+      <h1 style="font-size:20px;margin:0 0 8px;font-family:Arial,sans-serif;">${escapeHtml(title)}</h1>
+      <p style="color:#666;font-size:12px;margin:0 0 20px;">Translated to ${escapeHtml(langName)} (${escapeHtml(targetLang)}) · dragonPDF</p>
+      ${paragraphs}
+    </div>
+  `
+  return htmlStringToPdf(html)
 }
 
 export async function pdfToMarkdown(file: File): Promise<string> {
