@@ -35,26 +35,29 @@ export function Home() {
   return (
     <div className="page">
       <section className="hero">
-        <h1>Every tool you need to work with PDFs</h1>
+        <div className="hero-badge">🐉 dragonPDF suite</div>
+        <h1>
+          Forge PDFs with <span>dragon power</span>
+        </h1>
         <p>
-          Merge, split, compress, convert, edit, protect, OCR, and more — free
-          in your browser. Files never leave your device.
+          Merge, split, compress, convert, sign, and protect — a dark-mode
+          toolkit that runs entirely in your browser.
         </p>
         <div className="search-bar">
           <Search size={18} />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search tools (merge, OCR, watermark…)"
+            placeholder="Find a tool (merge, OCR, watermark…)"
             aria-label="Search tools"
           />
         </div>
         <div className="hero-stats">
           <span>{tools.length} tools</span>
           <span>·</span>
-          <span>100% client-side</span>
+          <span>Private by design</span>
           <span>·</span>
-          <span>No account required</span>
+          <span>No signup</span>
         </div>
       </section>
 
@@ -88,7 +91,7 @@ export function Home() {
               <h2 className="category-title">
                 <span
                   className="category-dot"
-                  style={{ background: meta.color }}
+                  style={{ background: meta.color, color: meta.color }}
                 />
                 {meta.title}
               </h2>

@@ -24,13 +24,13 @@ export const categoryMeta: Record<
   ToolCategory,
   { title: string; color: string }
 > = {
-  organize: { title: 'Organize PDF', color: '#E5322D' },
-  optimize: { title: 'Optimize PDF', color: '#27AE60' },
-  'convert-to': { title: 'Convert to PDF', color: '#F39C12' },
-  'convert-from': { title: 'Convert from PDF', color: '#3498DB' },
-  edit: { title: 'Edit PDF', color: '#9B59B6' },
-  security: { title: 'PDF Security', color: '#2980B9' },
-  intelligence: { title: 'PDF Intelligence', color: '#8E44AD' },
+  organize: { title: 'Organize', color: '#f07a28' },
+  optimize: { title: 'Optimize', color: '#3dd68c' },
+  'convert-to': { title: 'Convert to PDF', color: '#f0c14b' },
+  'convert-from': { title: 'Convert from PDF', color: '#5b9dff' },
+  edit: { title: 'Edit', color: '#c084fc' },
+  security: { title: 'Security', color: '#38bdf8' },
+  intelligence: { title: 'Intelligence', color: '#fb7185' },
 }
 
 export const tools: ToolDef[] = [
@@ -41,7 +41,7 @@ export const tools: ToolDef[] = [
     description:
       'Combine PDFs in the order you want with the easiest PDF merger available.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'merge',
     accept: 'application/pdf',
     multiple: true,
@@ -53,7 +53,7 @@ export const tools: ToolDef[] = [
     description:
       'Separate one page or a whole set for easy conversion into independent PDF files.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'split',
     accept: 'application/pdf',
     multiple: false,
@@ -63,7 +63,7 @@ export const tools: ToolDef[] = [
     name: 'Remove pages',
     description: 'Delete pages from your PDF. Remove unwanted pages in seconds.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'remove',
     accept: 'application/pdf',
     multiple: false,
@@ -73,7 +73,7 @@ export const tools: ToolDef[] = [
     name: 'Extract pages',
     description: 'Extract selected pages from your PDF into a new document.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'extract',
     accept: 'application/pdf',
     multiple: false,
@@ -84,7 +84,7 @@ export const tools: ToolDef[] = [
     description:
       'Sort pages of your PDF however you like. Delete PDF pages or add PDF pages.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'organize',
     accept: 'application/pdf',
     multiple: false,
@@ -95,7 +95,7 @@ export const tools: ToolDef[] = [
     description:
       'Capture document images from your device and turn them into a PDF instantly.',
     category: 'organize',
-    color: '#E5322D',
+    color: '#f07a28',
     icon: 'scan',
     accept: 'image/*',
     multiple: true,
@@ -108,7 +108,7 @@ export const tools: ToolDef[] = [
     description:
       'Reduce file size while optimizing for maximal PDF quality.',
     category: 'optimize',
-    color: '#27AE60',
+    color: '#3dd68c',
     icon: 'compress',
     accept: 'application/pdf',
     multiple: false,
@@ -119,7 +119,7 @@ export const tools: ToolDef[] = [
     description:
       'Repair a damaged PDF and recover data from corrupt PDF files.',
     category: 'optimize',
-    color: '#27AE60',
+    color: '#3dd68c',
     icon: 'repair',
     accept: 'application/pdf',
     multiple: false,
@@ -130,7 +130,7 @@ export const tools: ToolDef[] = [
     description:
       'Easily convert scanned PDF into searchable and selectable documents.',
     category: 'optimize',
-    color: '#27AE60',
+    color: '#3dd68c',
     icon: 'ocr',
     accept: 'application/pdf,image/*',
     multiple: false,
@@ -143,7 +143,7 @@ export const tools: ToolDef[] = [
     description:
       'Convert JPG images to PDF in seconds. Easily adjust orientation and margins.',
     category: 'convert-to',
-    color: '#F39C12',
+    color: '#f0c14b',
     icon: 'jpg-pdf',
     accept: 'image/jpeg,image/jpg,image/png,image/webp,image/gif',
     multiple: true,
@@ -153,7 +153,7 @@ export const tools: ToolDef[] = [
     name: 'Word to PDF',
     description: 'Make DOC and DOCX files easy to read by converting them to PDF.',
     category: 'convert-to',
-    color: '#2B579A',
+    color: '#5b9dff',
     icon: 'word-pdf',
     accept:
       '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -165,7 +165,7 @@ export const tools: ToolDef[] = [
     description:
       'Make PPT and PPTX slideshows easy to view by converting them to PDF.',
     category: 'convert-to',
-    color: '#D24726',
+    color: '#ff6b4a',
     icon: 'ppt-pdf',
     accept:
       '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -176,7 +176,7 @@ export const tools: ToolDef[] = [
     name: 'Excel to PDF',
     description: 'Make Excel spreadsheets easy to read by converting them to PDF.',
     category: 'convert-to',
-    color: '#217346',
+    color: '#34d399',
     icon: 'excel-pdf',
     accept:
       '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -188,7 +188,7 @@ export const tools: ToolDef[] = [
     description:
       'Convert webpages in HTML to PDF. Paste HTML content and convert.',
     category: 'convert-to',
-    color: '#E67E22',
+    color: '#fb923c',
     icon: 'html-pdf',
     accept: '.html,.htm,text/html',
     multiple: false,
@@ -201,7 +201,7 @@ export const tools: ToolDef[] = [
     description:
       'Convert each PDF page into a JPG or extract all images contained in a PDF.',
     category: 'convert-from',
-    color: '#F1C40F',
+    color: '#fbbf24',
     icon: 'pdf-jpg',
     accept: 'application/pdf',
     multiple: false,
@@ -212,7 +212,7 @@ export const tools: ToolDef[] = [
     description:
       'Easily convert your PDF files into easy to edit DOC and DOCX documents.',
     category: 'convert-from',
-    color: '#2B579A',
+    color: '#5b9dff',
     icon: 'pdf-word',
     accept: 'application/pdf',
     multiple: false,
@@ -222,7 +222,7 @@ export const tools: ToolDef[] = [
     name: 'PDF to PowerPoint',
     description: 'Turn your PDF files into easy to edit PPT and PPTX slideshows.',
     category: 'convert-from',
-    color: '#D24726',
+    color: '#ff6b4a',
     icon: 'pdf-ppt',
     accept: 'application/pdf',
     multiple: false,
@@ -233,7 +233,7 @@ export const tools: ToolDef[] = [
     description:
       'Pull data straight from PDFs into Excel spreadsheets in a few short seconds.',
     category: 'convert-from',
-    color: '#217346',
+    color: '#34d399',
     icon: 'pdf-excel',
     accept: 'application/pdf',
     multiple: false,
@@ -244,7 +244,7 @@ export const tools: ToolDef[] = [
     description:
       'Transform your PDF to PDF/A, the ISO-standardized version of PDF for long-term archiving.',
     category: 'convert-from',
-    color: '#3498DB',
+    color: '#38bdf8',
     icon: 'pdfa',
     accept: 'application/pdf',
     multiple: false,
@@ -257,7 +257,7 @@ export const tools: ToolDef[] = [
     description:
       'Rotate your PDFs the way you need them. You can even rotate multiple PDFs at once!',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'rotate',
     accept: 'application/pdf',
     multiple: true,
@@ -268,7 +268,7 @@ export const tools: ToolDef[] = [
     description:
       'Add page numbers into PDFs with ease. Choose your positions, dimensions, typography.',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'numbers',
     accept: 'application/pdf',
     multiple: false,
@@ -279,7 +279,7 @@ export const tools: ToolDef[] = [
     description:
       'Stamp an image or text over your PDF in seconds. Choose typography and transparency.',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'watermark',
     accept: 'application/pdf',
     multiple: false,
@@ -290,7 +290,7 @@ export const tools: ToolDef[] = [
     description:
       'Crop margins of PDF documents or select specific areas, then apply to one page or the whole document.',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'crop',
     accept: 'application/pdf',
     multiple: false,
@@ -301,7 +301,7 @@ export const tools: ToolDef[] = [
     description:
       'Add text, images, shapes or freehand annotations to a PDF document. Edit size, font, and color.',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'edit',
     accept: 'application/pdf',
     multiple: false,
@@ -312,7 +312,7 @@ export const tools: ToolDef[] = [
     description:
       'Detect form fields automatically, create interactive fillable PDFs, or fill PDF forms yourself.',
     category: 'edit',
-    color: '#9B59B6',
+    color: '#c084fc',
     icon: 'forms',
     accept: 'application/pdf',
     multiple: false,
@@ -326,7 +326,7 @@ export const tools: ToolDef[] = [
     description:
       'Remove PDF password security, giving you the freedom to use your PDFs as you want.',
     category: 'security',
-    color: '#2980B9',
+    color: '#38bdf8',
     icon: 'unlock',
     accept: 'application/pdf',
     multiple: false,
@@ -337,7 +337,7 @@ export const tools: ToolDef[] = [
     description:
       'Protect PDF files with a password. Encrypt PDF documents to prevent unauthorized access.',
     category: 'security',
-    color: '#2980B9',
+    color: '#38bdf8',
     icon: 'protect',
     accept: 'application/pdf',
     multiple: false,
@@ -347,7 +347,7 @@ export const tools: ToolDef[] = [
     name: 'Sign PDF',
     description: 'Sign yourself or request electronic signatures from others.',
     category: 'security',
-    color: '#2980B9',
+    color: '#38bdf8',
     icon: 'sign',
     accept: 'application/pdf',
     multiple: false,
@@ -358,7 +358,7 @@ export const tools: ToolDef[] = [
     description:
       'Redact text and graphics to permanently remove sensitive information from a PDF.',
     category: 'security',
-    color: '#2980B9',
+    color: '#38bdf8',
     icon: 'redact',
     accept: 'application/pdf',
     multiple: false,
@@ -369,7 +369,7 @@ export const tools: ToolDef[] = [
     description:
       'Show a side-by-side document comparison and easily spot changes between different file versions.',
     category: 'security',
-    color: '#2980B9',
+    color: '#38bdf8',
     icon: 'compare',
     accept: 'application/pdf',
     multiple: true,
@@ -383,7 +383,7 @@ export const tools: ToolDef[] = [
     description:
       'Quickly generate concise summaries from articles, paragraphs, and essays with key points.',
     category: 'intelligence',
-    color: '#8E44AD',
+    color: '#fb7185',
     icon: 'summarize',
     accept: 'application/pdf',
     multiple: false,
@@ -395,7 +395,7 @@ export const tools: ToolDef[] = [
     description:
       'Easily translate PDF files. Keep fonts, layout, and formatting intact where possible.',
     category: 'intelligence',
-    color: '#8E44AD',
+    color: '#fb7185',
     icon: 'translate',
     accept: 'application/pdf',
     multiple: false,
@@ -406,7 +406,7 @@ export const tools: ToolDef[] = [
     name: 'PDF to Markdown',
     description: 'Convert PDF content into clean Markdown for docs and blogs.',
     category: 'intelligence',
-    color: '#8E44AD',
+    color: '#fb7185',
     icon: 'markdown',
     accept: 'application/pdf',
     multiple: false,

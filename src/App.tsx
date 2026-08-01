@@ -12,8 +12,8 @@ export default function App() {
         <Route path="/tools/:toolId" element={<ToolPage />} />
       </Routes>
       <footer className="footer">
-        PDF Tools — files are processed in your browser and never uploaded to a
-        server.
+        <strong>dragonPDF</strong> — your files stay on this device. Nothing is
+        uploaded to a server.
       </footer>
     </>
   )
