@@ -34,11 +34,12 @@ export function ToolPage() {
   const [pageRange, setPageRange] = useState('')
   const [rotateAngle, setRotateAngle] = useState<90 | 180 | 270>(90)
   const [watermark, setWatermark] = useState('CONFIDENTIAL')
-  const [wmOpacity, setWmOpacity] = useState(0.28)
+  const [wmOpacity, setWmOpacity] = useState(0.5)
   const [wmPosition, setWmPosition] = useState<
-    'center' | 'tile' | 'top' | 'bottom'
-  >('center')
+    'center' | 'tile' | 'top' | 'bottom' | 'diagonal'
+  >('diagonal')
   const [wmAngle, setWmAngle] = useState(45)
+  const [wmImage, setWmImage] = useState<File | null>(null)
   const [rmWmKeyword, setRmWmKeyword] = useState('')
   const [rmWmMode, setRmWmMode] = useState<'text' | 'center-band' | 'both'>(
     'both',
@@ -292,14 +293,41 @@ export function ToolPage() {
           break
         }
         case 'watermark': {
+          if (!watermark.trim() && !wmImage) {
+            throw new Error('Enter watermark text or choose an image.')
+          }
+          let imageBytes: Uint8Array | undefined
+          let imageType: 'png' | 'jpg' | undefined
+          if (wmImage) {
+            imageBytes = new Uint8Array(await wmImage.arrayBuffer())
+            imageType = wmImage.type.includes('png') ? 'png' : 'jpg'
+          }
           const bytes = await ops.addWatermark(f, {
-            text: watermark,
+            text: watermark.trim() || 'WATERMARK',
             opacity: wmOpacity,
-            position: wmPosition,
+            position: wmPosition === 'center' ? 'diagonal' : wmPosition,
             angle: wmAngle,
+            imageBytes,
+            imageType,
           })
           ops.downloadBytes(bytes, `${ops.baseName(f.name)}_watermark.pdf`)
-          break
+          // Live preview so user can confirm it worked
+          try {
+            const url = await ops.renderPreview(
+              new File([bytes], 'wm.pdf', { type: 'application/pdf' }),
+              0,
+              1.2,
+            )
+            setPreview(url)
+          } catch {
+            /* preview optional */
+          }
+          setStatus({
+            type: 'success',
+            msg: 'Watermark applied — download started. Preview shows page 1 below.',
+          })
+          setBusy(false)
+          return
         }
         case 'remove-watermark': {
           const { bytes, method } = await ops.removeWatermark(f, {
@@ -648,6 +676,8 @@ export function ToolPage() {
           setWmPosition={setWmPosition}
           wmAngle={wmAngle}
           setWmAngle={setWmAngle}
+          wmImage={wmImage}
+          setWmImage={setWmImage}
           rmWmKeyword={rmWmKeyword}
           setRmWmKeyword={setRmWmKeyword}
           rmWmMode={rmWmMode}
@@ -742,10 +772,12 @@ function Options(props: {
   setWatermark: (v: string) => void
   wmOpacity: number
   setWmOpacity: (v: number) => void
-  wmPosition: 'center' | 'tile' | 'top' | 'bottom'
-  setWmPosition: (v: 'center' | 'tile' | 'top' | 'bottom') => void
+  wmPosition: 'center' | 'tile' | 'top' | 'bottom' | 'diagonal'
+  setWmPosition: (v: 'center' | 'tile' | 'top' | 'bottom' | 'diagonal') => void
   wmAngle: number
   setWmAngle: (v: number) => void
+  wmImage: File | null
+  setWmImage: (v: File | null) => void
   rmWmKeyword: string
   setRmWmKeyword: (v: string) => void
   rmWmMode: 'text' | 'center-band' | 'both'
@@ -901,16 +933,45 @@ function Options(props: {
             />
           </label>
           <label>
+            Or image watermark (PNG / JPG)
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              onChange={(e) =>
+                props.setWmImage(e.target.files?.[0] ?? null)
+              }
+            />
+          </label>
+          {props.wmImage && (
+            <p className="muted" style={{ margin: 0 }}>
+              Image: {props.wmImage.name}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ marginLeft: 8, padding: '0.2rem 0.5rem' }}
+                onClick={() => props.setWmImage(null)}
+              >
+                Clear image
+              </button>
+            </p>
+          )}
+          <label>
             Position
             <select
               value={props.wmPosition}
               onChange={(e) =>
                 props.setWmPosition(
-                  e.target.value as 'center' | 'tile' | 'top' | 'bottom',
+                  e.target.value as
+                    | 'center'
+                    | 'tile'
+                    | 'top'
+                    | 'bottom'
+                    | 'diagonal',
                 )
               }
             >
-              <option value="center">Center (diagonal)</option>
+              <option value="diagonal">Center diagonal</option>
+              <option value="center">Center</option>
               <option value="tile">Tile across page</option>
               <option value="top">Top</option>
               <option value="bottom">Bottom</option>
@@ -920,9 +981,9 @@ function Options(props: {
             Opacity {Math.round(props.wmOpacity * 100)}%
             <input
               type="range"
-              min={0.08}
-              max={0.7}
-              step={0.02}
+              min={0.15}
+              max={0.9}
+              step={0.05}
               value={props.wmOpacity}
               onChange={(e) => props.setWmOpacity(Number(e.target.value))}
             />
@@ -938,6 +999,10 @@ function Options(props: {
               onChange={(e) => props.setWmAngle(Number(e.target.value))}
             />
           </label>
+          <p className="muted" style={{ margin: 0 }}>
+            Tip: use opacity ~50% and angle 45° for a classic stamp. Download +
+            page preview appear after you run the tool.
+          </p>
         </>
       )}
       {id === 'remove-watermark' && (

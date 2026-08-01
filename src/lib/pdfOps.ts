@@ -31,7 +31,24 @@ export function downloadBytes(
   filename: string,
   mime = 'application/pdf',
 ) {
-  saveAs(new Blob([bytes], { type: mime }), filename)
+  // Copy into a plain ArrayBuffer-backed Uint8Array for Blob compatibility
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  const blob = new Blob([copy], { type: mime })
+  try {
+    saveAs(blob, filename)
+  } catch {
+    // Fallback download
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  }
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -202,67 +219,185 @@ function placeText(
 export type WatermarkOptions = {
   text: string
   opacity?: number
-  /** rotation degrees */
+  /** rotation degrees (counter-clockwise in PDF) */
   angle?: number
-  /** relative font size vs page (default ~1/9) */
+  /** font size as fraction of min(page w,h); default 0.12 */
   scale?: number
-  position?: 'center' | 'tile' | 'top' | 'bottom'
+  position?: 'center' | 'tile' | 'top' | 'bottom' | 'diagonal'
   color?: { r: number; g: number; b: number }
+  /** optional PNG/JPG image watermark (data URL or bytes) */
+  imageBytes?: Uint8Array
+  imageType?: 'png' | 'jpg'
+}
+
+/**
+ * Place text so its visual center sits at (cx, cy) after rotation.
+ * pdf-lib rotates around the baseline origin (x, y).
+ */
+function originForCenteredText(
+  cx: number,
+  cy: number,
+  textWidth: number,
+  fontSize: number,
+  angleDeg: number,
+) {
+  const rad = (angleDeg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  // Midpoint of baseline → page center; nudge up by ~0.35*size for glyph body
+  const midX = textWidth / 2
+  const midY = fontSize * 0.35
+  return {
+    x: cx - midX * cos + midY * sin,
+    y: cy - midX * sin - midY * cos,
+  }
+}
+
+/** Sanitize to WinAnsi-safe characters for StandardFonts */
+function winAnsiSafe(text: string) {
+  return text
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '?')
+    .trim()
 }
 
 export async function addWatermark(
   file: File,
   textOrOpts: string | WatermarkOptions,
-  opacityArg = 0.28,
+  opacityArg = 0.5,
 ): Promise<Uint8Array> {
   const opts: WatermarkOptions =
     typeof textOrOpts === 'string'
       ? { text: textOrOpts, opacity: opacityArg }
       : textOrOpts
-  const text = (opts.text || '').trim()
-  if (!text) throw new Error('Enter watermark text.')
-  const opacity = opts.opacity ?? 0.28
-  const angle = opts.angle ?? 45
-  const position = opts.position ?? 'center'
-  const color = opts.color ?? { r: 0.45, g: 0.45, b: 0.45 }
+
+  const rawText = (opts.text || '').trim()
+  const text = winAnsiSafe(rawText || 'WATERMARK')
+  if (!text && !opts.imageBytes) {
+    throw new Error('Enter watermark text or provide an image.')
+  }
+
+  const opacity = Math.min(1, Math.max(0.05, opts.opacity ?? 0.5))
+  // default diagonal look
+  const position = opts.position ?? 'diagonal'
+  const angle =
+    opts.angle ??
+    (position === 'top' || position === 'bottom' ? 0 : 45)
+  const color = opts.color ?? { r: 0.55, g: 0.55, b: 0.55 }
+  const scale = opts.scale ?? 0.12
 
   const doc = await loadDoc(file)
   const font = await doc.embedFont(StandardFonts.HelveticaBold)
 
-  doc.getPages().forEach((page) => {
+  let embeddedImage:
+    | Awaited<ReturnType<PDFDocument['embedPng']>>
+    | Awaited<ReturnType<PDFDocument['embedJpg']>>
+    | null = null
+  if (opts.imageBytes && opts.imageBytes.length > 0) {
+    try {
+      embeddedImage =
+        opts.imageType === 'jpg'
+          ? await doc.embedJpg(opts.imageBytes)
+          : await doc.embedPng(opts.imageBytes)
+    } catch {
+      try {
+        embeddedImage = await doc.embedJpg(opts.imageBytes)
+      } catch {
+        embeddedImage = null
+      }
+    }
+  }
+
+  const pages = doc.getPages()
+  if (!pages.length) throw new Error('PDF has no pages.')
+
+  for (const page of pages) {
     const { width, height } = page.getSize()
-    const size = Math.min(width, height) / (opts.scale ? 1 / opts.scale : 9)
-    const fontSize = Math.max(10, Math.min(size, 120))
-    const tw = font.widthOfTextAtSize(text, fontSize)
-    const drawAt = (x: number, y: number) => {
-      page.drawText(text, {
-        x,
-        y,
-        size: fontSize,
-        font,
-        color: rgb(color.r, color.g, color.b),
+    // Fit text on the page diagonal/width so it never draws as a tiny off-page glyph
+    let fontSize = Math.max(16, Math.min(width, height) * scale)
+    let tw = font.widthOfTextAtSize(text, fontSize)
+    const maxTextWidth = Math.min(width, height) * 0.85
+    if (tw > maxTextWidth) {
+      fontSize = fontSize * (maxTextWidth / tw)
+      fontSize = Math.max(12, fontSize)
+      tw = font.widthOfTextAtSize(text, fontSize)
+    }
+
+    const stampText = (cx: number, cy: number, rot: number) => {
+      const { x, y } = originForCenteredText(cx, cy, tw, fontSize, rot)
+      try {
+        page.drawText(text, {
+          x,
+          y,
+          size: fontSize,
+          font,
+          color: rgb(color.r, color.g, color.b),
+          opacity,
+          rotate: degrees(rot),
+        })
+      } catch {
+        // Fallback without rotation if something fails
+        page.drawText(text, {
+          x: Math.max(10, cx - tw / 2),
+          y: Math.max(10, cy - fontSize / 3),
+          size: fontSize,
+          font,
+          color: rgb(color.r, color.g, color.b),
+          opacity,
+        })
+      }
+    }
+
+    const stampImage = (cx: number, cy: number) => {
+      if (!embeddedImage) return
+      const maxW = width * 0.45
+      const maxH = height * 0.35
+      const ratio = embeddedImage.width / embeddedImage.height
+      let w = maxW
+      let h = w / ratio
+      if (h > maxH) {
+        h = maxH
+        w = h * ratio
+      }
+      page.drawImage(embeddedImage, {
+        x: cx - w / 2,
+        y: cy - h / 2,
+        width: w,
+        height: h,
         opacity,
         rotate: degrees(angle),
       })
     }
 
     if (position === 'tile') {
-      const stepX = Math.max(tw * 1.4, width / 2.2)
-      const stepY = Math.max(fontSize * 4, height / 3)
-      for (let y = stepY / 2; y < height; y += stepY) {
-        for (let x = 20; x < width - 20; x += stepX) {
-          drawAt(x, y)
+      const cols = 3
+      const rows = 4
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cx = ((c + 0.5) / cols) * width
+          const cy = ((r + 0.5) / rows) * height
+          if (embeddedImage) stampImage(cx, cy)
+          else stampText(cx, cy, angle)
         }
       }
     } else if (position === 'top') {
-      drawAt(Math.max(20, (width - tw) / 2), height - fontSize * 2)
+      if (embeddedImage) stampImage(width / 2, height * 0.88)
+      else stampText(width / 2, height * 0.88, angle)
     } else if (position === 'bottom') {
-      drawAt(Math.max(20, (width - tw) / 2), fontSize * 1.5)
+      if (embeddedImage) stampImage(width / 2, height * 0.12)
+      else stampText(width / 2, height * 0.12, angle)
     } else {
-      drawAt(Math.max(20, (width - tw) / 2), height / 2 - fontSize / 2)
+      // center / diagonal — always stamp at page center with correct rotation
+      if (embeddedImage) stampImage(width / 2, height / 2)
+      else stampText(width / 2, height / 2, angle)
     }
-  })
-  return doc.save()
+  }
+
+  const saved = await doc.save({ useObjectStreams: false })
+  if (!saved || saved.length < 50) {
+    throw new Error('Watermark save failed — empty PDF output.')
+  }
+  return saved
 }
 
 export type RemoveWatermarkOptions = {
