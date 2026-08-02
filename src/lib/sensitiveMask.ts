@@ -655,12 +655,15 @@ export async function mapPool<T, R>(
 
 export type DirHandle = FileSystemDirectoryHandle
 
-export async function pickInputDirectory(): Promise<DirHandle | null> {
+export async function pickInputDirectory(
+  mode: 'read' | 'readwrite' = 'readwrite',
+): Promise<DirHandle | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const w = window as any
   if (!w.showDirectoryPicker) return null
   try {
-    return await w.showDirectoryPicker({ mode: 'read' })
+    // readwrite so we can save masked files back into the same folder
+    return await w.showDirectoryPicker({ mode })
   } catch {
     return null
   }
@@ -675,6 +678,42 @@ export async function pickOutputDirectory(): Promise<DirHandle | null> {
   } catch {
     return null
   }
+}
+
+/** Write bytes under dir, optionally creating nested path parts and/or a subfolder */
+export async function writeMaskedFile(
+  root: DirHandle,
+  relativePath: string,
+  bytes: Uint8Array,
+  opts?: {
+    /** e.g. "masked" — created under root; empty = write next to originals */
+    subfolder?: string
+    /** filename suffix before .pdf */
+    suffix?: string
+  },
+): Promise<string> {
+  const subfolder = opts?.subfolder ?? ''
+  const suffix = opts?.suffix ?? '_masked'
+  const safePath = relativePath.replace(/[<>:"|?*]/g, '_')
+  const parts = safePath.split(/[/\\]/).filter(Boolean)
+  const fileName = parts.pop() || 'document.pdf'
+  const base = fileName.replace(/\.pdf$/i, '') + suffix + '.pdf'
+
+  let dir: DirHandle = root
+  if (subfolder) {
+    dir = await dir.getDirectoryHandle(subfolder, { create: true })
+  }
+  for (const part of parts) {
+    dir = await dir.getDirectoryHandle(part, { create: true })
+  }
+  const fh = await dir.getFileHandle(base, { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(bytes)
+  await writable.close()
+
+  const prefix = subfolder ? `${subfolder}/` : ''
+  const rel = parts.length ? `${parts.join('/')}/` : ''
+  return `${prefix}${rel}${base}`
 }
 
 export async function listPdfsInDirectory(

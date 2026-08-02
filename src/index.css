@@ -1446,6 +1446,51 @@ textarea {
   gap: 0.75rem;
 }
 
+.bulk-save-options {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.bulk-save-card {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.bulk-save-card.active {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+}
+
+.bulk-save-card input {
+  margin-top: 0.2rem;
+}
+
+.bulk-save-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.bulk-save-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+  line-height: 1.35;
+}
+
+.bulk-save-card:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .bulk-controls label {
   display: grid;
   gap: 0.35rem;

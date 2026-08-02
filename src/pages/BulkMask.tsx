@@ -25,6 +25,7 @@ import {
   supportsDirectoryPicker,
   buildReportCsv,
   countByCategory,
+  writeMaskedFile,
   type MaskOptions,
   type MaskCategory,
   type FileJobResult,
@@ -49,12 +50,23 @@ export function BulkMask() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [queue, setQueue] = useState<QueuedFile[]>([])
   const [options, setOptions] = useState<MaskOptions>(defaultMaskOptions)
+  /** Folder the user loaded PDFs from */
+  const [sourceDir, setSourceDir] = useState<DirHandle | null>(null)
+  const [sourceDirName, setSourceDirName] = useState('')
+  /** Optional separate destination folder */
   const [outputDir, setOutputDir] = useState<DirHandle | null>(null)
   const [outputDirName, setOutputDirName] = useState('')
   const [concurrency, setConcurrency] = useState(2)
-  const [saveMode, setSaveMode] = useState<'folder' | 'zip' | 'individual'>(
-    supportsDirectoryPicker() ? 'folder' : 'zip',
-  )
+  /**
+   * same = write into the source folder
+   * custom = user-picked folder (any drive)
+   * zip / individual = browser download
+   */
+  const [saveMode, setSaveMode] = useState<
+    'same' | 'custom' | 'zip' | 'individual'
+  >(supportsDirectoryPicker() ? 'same' : 'zip')
+  /** Put results in a "masked" subfolder (safer) vs next to originals */
+  const [useMaskedSubfolder, setUseMaskedSubfolder] = useState(true)
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(0)
   const [results, setResults] = useState<FileJobResult[]>([])
@@ -89,14 +101,18 @@ export function BulkMask() {
       }
       return next.slice(0, MAX_FILES)
     })
+    // Multi-file pick has no folder handle — can't "save same"
+    setSourceDir(null)
+    setSourceDirName('')
     setResults([])
     setDone(0)
     setError(null)
+    setSaveMode((m) => (m === 'same' ? 'custom' : m))
   }, [])
 
   async function selectFolder() {
     setError(null)
-    const dir = await pickInputDirectory()
+    const dir = await pickInputDirectory('readwrite')
     if (!dir) {
       setError(
         'Folder picker cancelled or not supported. Use Chrome/Edge, or select multiple PDF files instead.',
@@ -110,6 +126,9 @@ export function BulkMask() {
       setLog(null)
       return
     }
+    setSourceDir(dir)
+    setSourceDirName(dir.name)
+    setSaveMode('same')
     setQueue(
       list.map((item) => ({
         id: `${item.path}-${Math.random().toString(36).slice(2, 7)}`,
@@ -118,7 +137,9 @@ export function BulkMask() {
         handle: item.handle,
       })),
     )
-    setLog(`Loaded ${list.length} PDF(s) from folder (max ${MAX_FILES}).`)
+    setLog(
+      `Loaded ${list.length} PDF(s) from “${dir.name}”. You can save masked files into this same folder or pick another.`,
+    )
     setResults([])
     setDone(0)
   }
@@ -128,7 +149,13 @@ export function BulkMask() {
     if (!dir) return
     setOutputDir(dir)
     setOutputDirName(dir.name)
-    setSaveMode('folder')
+    setSaveMode('custom')
+  }
+
+  function resolveSaveDir(): DirHandle | null {
+    if (saveMode === 'same') return sourceDir
+    if (saveMode === 'custom') return outputDir
+    return null
   }
 
   async function run() {
@@ -145,8 +172,14 @@ export function BulkMask() {
       setError('Last name masking is on — paste last names to mask (one per line).')
       return
     }
-    if (saveMode === 'folder' && !outputDir) {
-      setError('Choose an output folder (or switch save mode to ZIP).')
+    if (saveMode === 'same' && !sourceDir) {
+      setError(
+        '“Same as source folder” needs a folder pick (not individual files). Select a folder, or choose another save location.',
+      )
+      return
+    }
+    if (saveMode === 'custom' && !outputDir) {
+      setError('Choose a destination folder (any drive your browser can access).')
       return
     }
 
@@ -158,7 +191,9 @@ export function BulkMask() {
     setLog(`Processing ${queue.length} file(s)…`)
 
     const zip = saveMode === 'zip' ? new JSZip() : null
+    const saveDir = resolveSaveDir()
     const jobResults: FileJobResult[] = []
+    let lastSavedPath = ''
 
     try {
       await mapPool(
@@ -187,26 +222,17 @@ export function BulkMask() {
 
             const result = await maskSensitivePdf(data, {
               ...options,
-              onProgress: (msg) =>
-                setLog(`${item.path}: ${msg}`),
+              onProgress: (msg) => setLog(`${item.path}: ${msg}`),
             })
             const cats = countByCategory(result.hits)
             const base =
               item.name.replace(/\.pdf$/i, '') + '_masked.pdf'
 
-            if (saveMode === 'folder' && outputDir) {
-              // Preserve relative path under masked/
-              const safePath = item.path.replace(/[<>:"|?*]/g, '_')
-              const parts = safePath.split(/[/\\]/).filter(Boolean)
-              let dir: DirHandle = outputDir
-              dir = await dir.getDirectoryHandle('masked', { create: true })
-              for (let i = 0; i < parts.length - 1; i++) {
-                dir = await dir.getDirectoryHandle(parts[i], { create: true })
-              }
-              const fh = await dir.getFileHandle(base, { create: true })
-              const w = await fh.createWritable()
-              await w.write(result.bytes)
-              await w.close()
+            if ((saveMode === 'same' || saveMode === 'custom') && saveDir) {
+              lastSavedPath = await writeMaskedFile(saveDir, item.path, result.bytes, {
+                subfolder: useMaskedSubfolder ? 'masked' : '',
+                suffix: '_masked',
+              })
             } else if (saveMode === 'zip' && zip) {
               const zipPath = `masked/${item.path.replace(/\.pdf$/i, '')}_masked.pdf`
               zip.file(zipPath, result.bytes)
@@ -235,7 +261,11 @@ export function BulkMask() {
         },
         (d, t) => {
           setDone(d)
-          setLog(`Processed ${d} / ${t}…`)
+          setLog(
+            lastSavedPath
+              ? `Processed ${d} / ${t}… last saved: ${lastSavedPath}`
+              : `Processed ${d} / ${t}…`,
+          )
           setResults([...jobResults])
         },
         () => cancelRef.current,
@@ -247,37 +277,49 @@ export function BulkMask() {
         downloadBlob(blob, `dragonPDF_masked_${Date.now()}.zip`)
       }
 
-      // Report CSV
+      // Report CSV → same save destination when folder mode
       const report = buildReportCsv(jobResults)
-      if (saveMode === 'folder' && outputDir && !cancelRef.current) {
+      const reportName = `mask_report_${Date.now()}.csv`
+      if (
+        (saveMode === 'same' || saveMode === 'custom') &&
+        saveDir &&
+        !cancelRef.current
+      ) {
         try {
-          const fh = await outputDir.getFileHandle(
-            `mask_report_${Date.now()}.csv`,
-            { create: true },
-          )
+          const reportDir = useMaskedSubfolder
+            ? await saveDir.getDirectoryHandle('masked', { create: true })
+            : saveDir
+          const fh = await reportDir.getFileHandle(reportName, {
+            create: true,
+          })
           const w = await fh.createWritable()
           await w.write(report)
           await w.close()
         } catch {
           downloadBlob(
             new Blob([report], { type: 'text/csv' }),
-            `mask_report_${Date.now()}.csv`,
+            reportName,
           )
         }
       } else if (!cancelRef.current) {
-        downloadBlob(
-          new Blob([report], { type: 'text/csv' }),
-          `mask_report_${Date.now()}.csv`,
-        )
+        downloadBlob(new Blob([report], { type: 'text/csv' }), reportName)
       }
 
       const ok = jobResults.filter((r) => r.ok).length
       const hits = jobResults.reduce((n, r) => n + r.hitCount, 0)
       setResults([...jobResults])
+      const where =
+        saveMode === 'same'
+          ? `saved into source folder “${sourceDirName}”${useMaskedSubfolder ? '/masked' : ''}`
+          : saveMode === 'custom'
+            ? `saved into “${outputDirName}”${useMaskedSubfolder ? '/masked' : ''}`
+            : saveMode === 'zip'
+              ? 'ZIP downloaded'
+              : 'files downloaded'
       setLog(
         cancelRef.current
           ? `Cancelled after ${done} file(s).`
-          : `Finished · ${ok}/${jobResults.length} OK · ${hits} total redactions · report CSV saved`,
+          : `Finished · ${ok}/${jobResults.length} OK · ${hits} redactions · ${where} · CSV report written`,
       )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Batch failed')
@@ -370,6 +412,8 @@ export function BulkMask() {
                     setQueue([])
                     setResults([])
                     setDone(0)
+                    setSourceDir(null)
+                    setSourceDirName('')
                   }}
                 >
                   Clear
@@ -528,30 +572,73 @@ export function BulkMask() {
             parallel jobs = 1–2.
           </p>
 
-          <h2 className="bulk-section-title">3. Save location</h2>
-          <div className="bulk-controls">
-            <label>
-              Save mode
-              <select
-                value={saveMode}
+          <h2 className="bulk-section-title">3. Where to save</h2>
+          <div className="bulk-save-options">
+            {fsOk && (
+              <label className={`bulk-save-card ${saveMode === 'same' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  name="saveMode"
+                  checked={saveMode === 'same'}
+                  disabled={running || !sourceDir}
+                  onChange={() => setSaveMode('same')}
+                />
+                <span>
+                  <strong>Same as source folder</strong>
+                  <small>
+                    {sourceDirName
+                      ? `Write into “${sourceDirName}” (the folder you loaded)`
+                      : 'Select a source folder first (not multi-file pick)'}
+                  </small>
+                </span>
+              </label>
+            )}
+            {fsOk && (
+              <label className={`bulk-save-card ${saveMode === 'custom' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  name="saveMode"
+                  checked={saveMode === 'custom'}
+                  disabled={running}
+                  onChange={() => setSaveMode('custom')}
+                />
+                <span>
+                  <strong>Choose a different folder</strong>
+                  <small>
+                    Any local disk, USB, or network drive the browser can access
+                  </small>
+                </span>
+              </label>
+            )}
+            <label className={`bulk-save-card ${saveMode === 'zip' ? 'active' : ''}`}>
+              <input
+                type="radio"
+                name="saveMode"
+                checked={saveMode === 'zip'}
                 disabled={running}
-                onChange={(e) =>
-                  setSaveMode(e.target.value as typeof saveMode)
-                }
-              >
-                {fsOk && (
-                  <option value="folder">
-                    Output folder (any drive) — best for 10k files
-                  </option>
-                )}
-                <option value="zip">Download one ZIP</option>
-                <option value="individual">
-                  Download each file (small batches only)
-                </option>
-              </select>
+                onChange={() => setSaveMode('zip')}
+              />
+              <span>
+                <strong>Download ZIP</strong>
+                <small>One archive to your Downloads folder</small>
+              </span>
+            </label>
+            <label className={`bulk-save-card ${saveMode === 'individual' ? 'active' : ''}`}>
+              <input
+                type="radio"
+                name="saveMode"
+                checked={saveMode === 'individual'}
+                disabled={running}
+                onChange={() => setSaveMode('individual')}
+              />
+              <span>
+                <strong>Download each file</strong>
+                <small>Only for small batches (browser will prompt many times)</small>
+              </span>
             </label>
           </div>
-          {saveMode === 'folder' && (
+
+          {saveMode === 'custom' && (
             <div className="bulk-pick-row">
               <button
                 type="button"
@@ -561,15 +648,48 @@ export function BulkMask() {
               >
                 <HardDrive size={16} />{' '}
                 {outputDirName
-                  ? `Output: ${outputDirName}`
-                  : 'Choose output folder'}
+                  ? `Destination: ${outputDirName}`
+                  : 'Browse destination folder…'}
               </button>
             </div>
           )}
+
+          {(saveMode === 'same' || saveMode === 'custom') && (
+            <label className="bulk-cat" style={{ marginTop: 4 }}>
+              <input
+                type="checkbox"
+                checked={useMaskedSubfolder}
+                disabled={running}
+                onChange={(e) => setUseMaskedSubfolder(e.target.checked)}
+              />
+              <span>
+                <strong>Save inside a “masked” subfolder</strong>
+                <small>
+                  {useMaskedSubfolder
+                    ? 'Safer — originals stay untouched (e.g. MyFolder/masked/invoice_masked.pdf)'
+                    : 'Write next to originals (e.g. MyFolder/invoice_masked.pdf)'}
+                </small>
+              </span>
+            </label>
+          )}
+
           <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
-            Folder mode writes to <code>masked/</code> inside your chosen
-            location (local disk, USB, network drive — whatever the browser can
-            access). A CSV report is also saved.
+            {saveMode === 'same' && sourceDirName && (
+              <>
+                Output → <code>{sourceDirName}{useMaskedSubfolder ? '/masked/' : '/'}</code>
+                *_masked.pdf · CSV report included
+              </>
+            )}
+            {saveMode === 'custom' && (
+              <>
+                {outputDirName
+                  ? <>Output → <code>{outputDirName}{useMaskedSubfolder ? '/masked/' : '/'}</code></>
+                  : 'Pick a destination folder above (Desktop, D:\\, USB, etc.)'}
+              </>
+            )}
+            {(saveMode === 'zip' || saveMode === 'individual') && (
+              <>Files go to your browser Downloads.</>
+            )}
           </p>
 
           <div className="actions">
