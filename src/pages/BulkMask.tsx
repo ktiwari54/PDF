@@ -185,7 +185,11 @@ export function BulkMask() {
               throw new Error('No file data')
             }
 
-            const result = await maskSensitivePdf(data, options)
+            const result = await maskSensitivePdf(data, {
+              ...options,
+              onProgress: (msg) =>
+                setLog(`${item.path}: ${msg}`),
+            })
             const cats = countByCategory(result.hits)
             const base =
               item.name.replace(/\.pdf$/i, '') + '_masked.pdf'
@@ -298,9 +302,10 @@ export function BulkMask() {
           <h1>Bulk Sensitive Data Mask</h1>
           <p>
             Redact emails, phones, addresses, amounts, SSN/IDs, VAT, GST, trade
-            licenses, and last names — one PDF or up to{' '}
-            <strong>{MAX_FILES.toLocaleString()}</strong> files from a folder.
-            Everything stays on your machine.
+            licenses, and last names — including <strong>scanned / image PDFs</strong>{' '}
+            via OCR. One file or up to{' '}
+            <strong>{MAX_FILES.toLocaleString()}</strong> from a folder. All
+            local.
           </p>
         </div>
       </div>
@@ -465,13 +470,63 @@ export function BulkMask() {
                 disabled={running}
                 onChange={(e) => setConcurrency(Number(e.target.value))}
               >
-                <option value={1}>1 (safest)</option>
+                <option value={1}>1 (safest for OCR)</option>
                 <option value={2}>2 (recommended)</option>
                 <option value={3}>3</option>
                 <option value={4}>4 (fast / heavy)</option>
               </select>
             </label>
           </div>
+
+          <h2 className="bulk-section-title">Scanned / image PDFs (OCR)</h2>
+          <div className="bulk-controls">
+            <label>
+              OCR mode
+              <select
+                value={options.ocrMode || 'auto'}
+                disabled={running}
+                onChange={(e) =>
+                  setOptions((o) => ({
+                    ...o,
+                    ocrMode: e.target.value as MaskOptions['ocrMode'],
+                  }))
+                }
+              >
+                <option value="auto">
+                  Auto — OCR only pages with little text (recommended)
+                </option>
+                <option value="always">
+                  Always OCR every page (slow, best for full scans)
+                </option>
+                <option value="never">Never OCR (digital text only)</option>
+              </select>
+            </label>
+            <label>
+              OCR language
+              <select
+                value={options.ocrLang || 'eng'}
+                disabled={running || options.ocrMode === 'never'}
+                onChange={(e) =>
+                  setOptions((o) => ({ ...o, ocrLang: e.target.value }))
+                }
+              >
+                <option value="eng">English</option>
+                <option value="eng+ara">English + Arabic</option>
+                <option value="eng+hin">English + Hindi</option>
+                <option value="eng+fra">English + French</option>
+                <option value="eng+deu">English + German</option>
+                <option value="eng+spa">English + Spanish</option>
+                <option value="ara">Arabic</option>
+                <option value="hin">Hindi</option>
+              </select>
+            </label>
+          </div>
+          <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
+            Scanned bills and photo PDFs are OCR’d with Tesseract in your
+            browser, then sensitive fields are blacked out. First OCR run may
+            download language data. Large folders of scans are slower — use
+            parallel jobs = 1–2.
+          </p>
 
           <h2 className="bulk-section-title">3. Save location</h2>
           <div className="bulk-controls">

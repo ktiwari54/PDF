@@ -4,6 +4,7 @@
  */
 import { PDFDocument, rgb } from '@cantoo/pdf-lib'
 import * as pdfjs from 'pdfjs-dist'
+import Tesseract from 'tesseract.js'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -30,8 +31,21 @@ export type MaskOptions = {
   customPatterns?: string
   /** Black bar vs whiteout */
   style?: 'black' | 'white' | 'blur'
-  /** Padding around matches in points */
+  /** Padding around matches (normalized fraction of page when OCR; points-ish for text) */
   pad?: number
+  /**
+   * OCR scanned / image-only pages (Tesseract).
+   * auto = OCR when page has little extractable text
+   * always = OCR every page (slower, more accurate on scans)
+   * never = text layer only
+   */
+  ocrMode?: 'auto' | 'always' | 'never'
+  /** Tesseract language codes, e.g. eng, eng+ara, eng+hin */
+  ocrLang?: string
+  /** Max render width for OCR (higher = better accuracy, slower) */
+  ocrMaxWidth?: number
+  /** Progress callback */
+  onProgress?: (msg: string) => void
 }
 
 export type MaskHit = {
@@ -232,8 +246,18 @@ type Box = {
   text: string
 }
 
+type TextItem = {
+  str: string
+  /** normalized 0–1 top-left */
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 /**
- * Mask sensitive data in one PDF. Returns redacted bytes + hit log.
+ * Mask sensitive data in one PDF (digital text + scanned OCR).
+ * Returns redacted bytes + hit log.
  */
 export async function maskSensitivePdf(
   data: Uint8Array,
@@ -241,115 +265,75 @@ export async function maskSensitivePdf(
 ): Promise<MaskResult> {
   const matchers = buildMatchers(options)
   if (!matchers.length) {
-    throw new Error('Enable at least one masking category (or add last names / custom patterns).')
+    throw new Error(
+      'Enable at least one masking category (or add last names / custom patterns).',
+    )
   }
+
+  const ocrMode = options.ocrMode ?? 'auto'
+  const ocrLang = options.ocrLang || 'eng'
+  const ocrMaxWidth = options.ocrMaxWidth ?? 1400
+  const padN = (options.pad ?? 1.5) / 400 // ~normalize pad to fraction
+  const onProgress = options.onProgress
 
   const pdf = await pdfjs.getDocument({ data: data.slice() }).promise
   const boxes: Box[] = []
   const hits: MaskHit[] = []
-  const pad = options.pad ?? 1.5
+  let usedOcr = false
 
   for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex++) {
+    onProgress?.(
+      `Page ${pageIndex + 1}/${pdf.numPages}: reading text…`,
+    )
     const page = await pdf.getPage(pageIndex + 1)
     const viewport = page.getViewport({ scale: 1 })
-    const vw = viewport.width
-    const vh = viewport.height
     const content = await page.getTextContent()
-    const items: {
-      str: string
-      x: number
-      y: number
-      w: number
-      h: number
-    }[] = []
 
-    for (const item of content.items) {
-      if (!('str' in item)) continue
-      const it = item as {
-        str: string
-        transform: number[]
-        width: number
-        height: number
-      }
-      const str = it.str
-      if (!str || !str.trim()) continue
-      const m = pdfjs.Util.transform(viewport.transform, it.transform)
-      const fontHeight = Math.hypot(m[2], m[3]) || 10
-      const fontWidthScale = Math.hypot(m[0], m[1]) || 1
-      const w = Math.max((it.width || str.length * 0.5) * fontWidthScale, 2)
-      const h = Math.max(fontHeight, 6)
-      const x = m[4]
-      const yTop = m[5] - h * 0.8
-      items.push({ str, x, y: yTop, w, h })
-    }
+    let items: TextItem[] = extractTextItems(content, viewport)
 
-    const toNorm = (x: number, y: number, w: number, h: number) => ({
-      x: (x - pad) / vw,
-      y: (y - pad) / vh,
-      w: (w + pad * 2) / vw,
-      h: (h + pad * 2) / vh,
-    })
+    const textChars = items.reduce((n, it) => n + it.str.trim().length, 0)
+    const looksScanned =
+      items.length < 8 || textChars < 40
 
-    // Match per item
-    for (const it of items) {
-      for (const { category, re } of matchers) {
-        re.lastIndex = 0
-        if (re.test(it.str)) {
-          re.lastIndex = 0
-          const n = toNorm(it.x, it.y, it.w, it.h)
-          boxes.push({
-            page: pageIndex,
-            ...n,
-            category,
-            text: it.str.trim().slice(0, 80),
-          })
-          hits.push({
-            page: pageIndex + 1,
-            category,
-            text: it.str.trim().slice(0, 80),
-          })
-          break
+    const shouldOcr =
+      ocrMode === 'always' || (ocrMode === 'auto' && looksScanned)
+
+    if (shouldOcr) {
+      usedOcr = true
+      onProgress?.(
+        `Page ${pageIndex + 1}/${pdf.numPages}: OCR (scanned image)… first run may download language data`,
+      )
+      try {
+        const ocrItems = await ocrPageItems(page, ocrMaxWidth, ocrLang, (p) => {
+          if (p != null) {
+            onProgress?.(
+              `Page ${pageIndex + 1}/${pdf.numPages}: OCR ${Math.round(p * 100)}%`,
+            )
+          }
+        })
+        // Prefer OCR items when page is scanned; merge if always mode with existing text
+        if (looksScanned || ocrMode === 'always') {
+          if (ocrMode === 'always' && items.length) {
+            items = [...items, ...ocrItems]
+          } else {
+            items = ocrItems.length ? ocrItems : items
+          }
         }
+      } catch (e) {
+        onProgress?.(
+          `Page ${pageIndex + 1}: OCR failed (${e instanceof Error ? e.message : 'error'}) — using text layer only`,
+        )
       }
     }
 
-    // Line-joined matching for split emails / multi-span values
-    const lines = groupItemsIntoLines(items)
-    for (const line of lines) {
-      const joined = line.map((i) => i.str).join('')
-      const joinedSpaced = line.map((i) => i.str).join(' ')
-      for (const text of [joined, joinedSpaced]) {
-        for (const { category, re } of matchers) {
-          re.lastIndex = 0
-          const match = re.exec(text)
-          if (!match) continue
-          const minX = Math.min(...line.map((i) => i.x))
-          const maxX = Math.max(...line.map((i) => i.x + i.w))
-          const minY = Math.min(...line.map((i) => i.y))
-          const maxY = Math.max(...line.map((i) => i.y + i.h))
-          const n = toNorm(minX, minY, maxX - minX, maxY - minY)
-          const already = boxes.some(
-            (b) =>
-              b.page === pageIndex &&
-              Math.abs(b.x - n.x) < 0.01 &&
-              Math.abs(b.y - n.y) < 0.01,
-          )
-          if (already) continue
-          boxes.push({
-            page: pageIndex,
-            ...n,
-            category,
-            text: match[0].slice(0, 80),
-          })
-          hits.push({
-            page: pageIndex + 1,
-            category,
-            text: match[0].slice(0, 80),
-          })
-        }
-      }
-    }
+    collectMatches(items, matchers, pageIndex, padN, boxes, hits)
   }
+
+  onProgress?.(
+    usedOcr
+      ? `Applying ${boxes.length} redaction(s) (included OCR)…`
+      : `Applying ${boxes.length} redaction(s)…`,
+  )
 
   // Apply covers with pdf-lib (non-destructive overlay)
   const doc = await PDFDocument.load(data, { ignoreEncryption: true })
@@ -387,6 +371,200 @@ export async function maskSensitivePdf(
     bytes: new Uint8Array(bytes),
     hits,
     hitCount: hits.length,
+  }
+}
+
+function extractTextItems(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  content: { items: any[] },
+  viewport: { width: number; height: number; transform: number[] },
+): TextItem[] {
+  const vw = viewport.width
+  const vh = viewport.height
+  const items: TextItem[] = []
+
+  for (const item of content.items) {
+    if (!('str' in item)) continue
+    const it = item as {
+      str: string
+      transform: number[]
+      width: number
+      height: number
+    }
+    const str = it.str
+    if (!str || !str.trim()) continue
+    const m = pdfjs.Util.transform(viewport.transform, it.transform)
+    const fontHeight = Math.hypot(m[2], m[3]) || 10
+    const fontWidthScale = Math.hypot(m[0], m[1]) || 1
+    const w = Math.max((it.width || str.length * 0.5) * fontWidthScale, 2)
+    const h = Math.max(fontHeight, 6)
+    const x = m[4]
+    const yTop = m[5] - h * 0.8
+    items.push({
+      str,
+      x: x / vw,
+      y: yTop / vh,
+      w: w / vw,
+      h: h / vh,
+    })
+  }
+  return items
+}
+
+/** Rasterize page + OCR words with bounding boxes (normalized 0–1). */
+async function ocrPageItems(
+  page: pdfjs.PDFPageProxy,
+  maxWidth: number,
+  lang: string,
+  onProgress?: (p: number | null) => void,
+): Promise<TextItem[]> {
+  const base = page.getViewport({ scale: 1 })
+  const scale = Math.min(2.2, maxWidth / base.width)
+  const viewport = page.getViewport({ scale })
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.floor(viewport.width)
+  canvas.height = Math.floor(viewport.height)
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    canvas,
+  } as Parameters<typeof page.render>[0]).promise
+
+  const result = await Tesseract.recognize(canvas, lang, {
+    logger: (m) => {
+      if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+        onProgress?.(m.progress)
+      }
+    },
+  })
+
+  const cw = canvas.width
+  const ch = canvas.height
+  const items: TextItem[] = []
+
+  // Tesseract page data includes words/lines at runtime
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pageData = result.data as any
+  const words = (pageData.words || []) as {
+    text?: string
+    confidence?: number
+    bbox: { x0: number; y0: number; x1: number; y1: number }
+  }[]
+  for (const word of words) {
+    const text = (word.text || '').trim()
+    if (!text || text.length < 1) continue
+    if ((word.confidence ?? 0) < 35) continue
+    const b = word.bbox
+    items.push({
+      str: text,
+      x: b.x0 / cw,
+      y: b.y0 / ch,
+      w: Math.max((b.x1 - b.x0) / cw, 0.005),
+      h: Math.max((b.y1 - b.y0) / ch, 0.006),
+    })
+  }
+
+  // Full lines for multi-word emails / IDs split across words
+  const lines = (pageData.lines || []) as {
+    text?: string
+    bbox: { x0: number; y0: number; x1: number; y1: number }
+  }[]
+  for (const line of lines) {
+    const text = (line.text || '').trim()
+    if (!text || text.length < 3) continue
+    const b = line.bbox
+    items.push({
+      str: text,
+      x: b.x0 / cw,
+      y: b.y0 / ch,
+      w: Math.max((b.x1 - b.x0) / cw, 0.01),
+      h: Math.max((b.y1 - b.y0) / ch, 0.008),
+    })
+  }
+
+  return items
+}
+
+function collectMatches(
+  items: TextItem[],
+  matchers: { category: MaskCategory; re: RegExp }[],
+  pageIndex: number,
+  padN: number,
+  boxes: Box[],
+  hits: MaskHit[],
+) {
+  const pad = Math.max(padN, 0.002)
+
+  const pushBox = (
+    category: MaskCategory,
+    text: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ) => {
+    const box: Box = {
+      page: pageIndex,
+      x: Math.max(0, x - pad),
+      y: Math.max(0, y - pad),
+      w: Math.min(1, w + pad * 2),
+      h: Math.min(1, h + pad * 2),
+      category,
+      text: text.slice(0, 80),
+    }
+    // de-dupe near-identical boxes
+    const dup = boxes.some(
+      (b) =>
+        b.page === pageIndex &&
+        Math.abs(b.x - box.x) < 0.008 &&
+        Math.abs(b.y - box.y) < 0.008 &&
+        Math.abs(b.w - box.w) < 0.02,
+    )
+    if (dup) return
+    boxes.push(box)
+    hits.push({ page: pageIndex + 1, category, text: text.slice(0, 80) })
+  }
+
+  // Per-item match
+  for (const it of items) {
+    for (const { category, re } of matchers) {
+      re.lastIndex = 0
+      if (re.test(it.str)) {
+        re.lastIndex = 0
+        pushBox(category, it.str.trim(), it.x, it.y, it.w, it.h)
+        break
+      }
+    }
+  }
+
+  // Line groups for split tokens
+  const lines = groupItemsIntoLines(
+    items.map((it) => ({
+      str: it.str,
+      x: it.x,
+      y: it.y,
+      w: it.w,
+      h: it.h,
+    })),
+  )
+  for (const line of lines) {
+    const joined = line.map((i) => i.str).join('')
+    const spaced = line.map((i) => i.str).join(' ')
+    for (const text of [joined, spaced]) {
+      for (const { category, re } of matchers) {
+        re.lastIndex = 0
+        const match = re.exec(text)
+        if (!match) continue
+        const minX = Math.min(...line.map((i) => i.x))
+        const maxX = Math.max(...line.map((i) => i.x + i.w))
+        const minY = Math.min(...line.map((i) => i.y))
+        const maxY = Math.max(...line.map((i) => i.y + i.h))
+        pushBox(category, match[0], minX, minY, maxX - minX, maxY - minY)
+      }
+    }
   }
 }
 
@@ -436,6 +614,9 @@ export function defaultMaskOptions(): MaskOptions {
     customPatterns: '',
     style: 'black',
     pad: 1.5,
+    ocrMode: 'auto',
+    ocrLang: 'eng',
+    ocrMaxWidth: 1400,
   }
 }
 
