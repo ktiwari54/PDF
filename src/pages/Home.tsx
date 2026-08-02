@@ -53,13 +53,19 @@ export function Home() {
             flexWrap: 'wrap',
           }}
         >
-          <Link to="/editor" className="btn btn-primary">
-            Open Live Editor
+          <Link to="/bulk-mask" className="btn btn-primary">
+            Bulk PDF Masker
+          </Link>
+          <Link to="/editor" className="btn btn-ghost">
+            Live Editor
           </Link>
           <Link to="/ppt-maker" className="btn btn-ghost">
             AI PPT Maker
           </Link>
         </div>
+        <p className="muted" style={{ marginTop: '0.85rem', fontSize: '0.85rem' }}>
+          Also under <strong>Security → Bulk PDF Masker</strong>, or search “mask”
+        </p>
         <div className="search-bar">
           <Search size={18} />
           <input

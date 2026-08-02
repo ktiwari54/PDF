@@ -127,6 +127,16 @@ textarea {
   background: var(--accent-soft);
 }
 
+.nav-links a.nav-highlight {
+  color: var(--accent-gold);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+}
+
+.header-pill-link:hover {
+  filter: brightness(1.1);
+}
+
 .header-spacer {
   flex: 1;
 }
@@ -697,7 +707,8 @@ textarea {
   .workspace {
     padding: 1.25rem;
   }
-  .header-pill {
+  /* Keep Bulk Masker pill visible on mobile */
+  .header-pill:not(.header-pill-link) {
     display: none;
   }
 }

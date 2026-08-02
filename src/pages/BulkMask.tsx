@@ -341,7 +341,7 @@ export function BulkMask() {
           <ShieldAlert size={26} color="#fff" />
         </div>
         <div>
-          <h1>Bulk Sensitive Data Mask</h1>
+          <h1>Bulk PDF Masker</h1>
           <p>
             Redact emails, phones, addresses, amounts, SSN/IDs, VAT, GST, trade
             licenses, and last names — including <strong>scanned / image PDFs</strong>{' '}

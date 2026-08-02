@@ -13,16 +13,19 @@ export function Header() {
           </span>
         </Link>
         <nav className="nav-links">
+          <Link to="/bulk-mask" className="nav-highlight">
+            Bulk PDF Masker
+          </Link>
           <Link to="/editor">Live Edit</Link>
           <Link to="/ppt-maker">PPT Maker</Link>
-          <Link to="/bulk-mask">Bulk Mask</Link>
           <Link to="/tools/merge-pdf">Merge</Link>
           <Link to="/tools/split-pdf">Split</Link>
-          <Link to="/tools/compress-pdf">Compress</Link>
           <Link to="/">All tools</Link>
         </nav>
         <div className="header-spacer" />
-        <span className="header-pill">Browser-only</span>
+        <Link to="/bulk-mask" className="header-pill header-pill-link">
+          Bulk Masker
+        </Link>
       </div>
     </header>
   )

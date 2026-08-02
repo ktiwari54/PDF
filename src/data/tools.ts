@@ -334,15 +334,15 @@ export const tools: ToolDef[] = [
   // Security
   {
     id: 'bulk-mask',
-    name: 'Bulk Sensitive Mask',
+    name: 'Bulk PDF Masker',
     description:
-      'Mask PII on digital and scanned PDFs (OCR). Email, phone, amounts, VAT/GST, licenses — up to 10,000 files.',
+      'Mask emails, phones, addresses, amounts, VAT/GST, licenses & names on digital or scanned PDFs — up to 10,000 files.',
     category: 'security',
     color: '#38bdf8',
     icon: 'bulk-mask',
     accept: 'application/pdf',
     multiple: true,
-    badge: 'OCR',
+    badge: 'Bulk',
   },
   {
     id: 'unlock-pdf',
