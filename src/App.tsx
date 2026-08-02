@@ -4,6 +4,7 @@ import { Home } from './pages/Home'
 import { ToolPage } from './pages/ToolPage'
 import { LiveEditor } from './pages/LiveEditor'
 import { PptMaker } from './pages/PptMaker'
+import { BulkMask } from './pages/BulkMask'
 
 export default function App() {
   const location = useLocation()
@@ -27,6 +28,8 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/ppt-maker" element={<PptMaker />} />
         <Route path="/tools/ppt-maker" element={<PptMaker />} />
+        <Route path="/bulk-mask" element={<BulkMask />} />
+        <Route path="/tools/bulk-mask" element={<BulkMask />} />
         <Route path="/tools/:toolId" element={<ToolPage />} />
         <Route path="/editor" element={<LiveEditor />} />
       </Routes>

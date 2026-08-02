@@ -32,6 +32,7 @@ import {
   Sparkles,
   Languages,
   FileCode,
+  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -71,6 +72,7 @@ const map: Record<string, LucideIcon> = {
   translate: Languages,
   markdown: FileCode,
   'ppt-maker': Presentation,
+  'bulk-mask': ShieldAlert,
 }
 
 export function ToolIcon({

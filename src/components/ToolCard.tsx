@@ -8,7 +8,9 @@ export function ToolCard({ tool }: { tool: ToolDef }) {
       ? '/editor'
       : tool.id === 'ppt-maker'
         ? '/ppt-maker'
-        : `/tools/${tool.id}`
+        : tool.id === 'bulk-mask'
+          ? '/bulk-mask'
+          : `/tools/${tool.id}`
   return (
     <Link to={href} className="tool-card">
       {tool.badge && <span className="badge">{tool.badge}</span>}

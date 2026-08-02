@@ -18,6 +18,7 @@ Open http://127.0.0.1:5173
 
 33+ tools across Organize · Optimize · Convert · Edit · Security · Intelligence.  
 **AI PPT Maker** — create professional `.pptx` decks from a text prompt (themes, agenda, content).  
+**Bulk Sensitive Mask** — redact email/phone/address/amounts/VAT/GST/licenses/last names for 1–10,000 PDFs (folder in/out).  
 All core PDF processing stays on your device.
 
 ## Stack

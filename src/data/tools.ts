@@ -333,6 +333,18 @@ export const tools: ToolDef[] = [
 
   // Security
   {
+    id: 'bulk-mask',
+    name: 'Bulk Sensitive Mask',
+    description:
+      'Mask emails, phones, addresses, amounts, VAT/GST, licenses, last names — 1 file or up to 10,000 from a folder.',
+    category: 'security',
+    color: '#38bdf8',
+    icon: 'bulk-mask',
+    accept: 'application/pdf',
+    multiple: true,
+    badge: 'Bulk',
+  },
+  {
     id: 'unlock-pdf',
     name: 'Unlock PDF',
     description:
