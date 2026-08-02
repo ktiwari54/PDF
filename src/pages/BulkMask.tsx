@@ -493,7 +493,7 @@ export function BulkMask() {
             <label>
               Mask style
               <select
-                value={options.style || 'black'}
+                value={options.style || 'asterisk'}
                 disabled={running}
                 onChange={(e) =>
                   setOptions((o) => ({
@@ -502,9 +502,12 @@ export function BulkMask() {
                   }))
                 }
               >
+                <option value="asterisk">
+                  Asterisks (****) — refined, replaces numbers/letters
+                </option>
+                <option value="blur">Soft blur / mosaic</option>
                 <option value="black">Black redaction bars</option>
-                <option value="white">Whiteout</option>
-                <option value="blur">Gray cover</option>
+                <option value="white">Whiteout only</option>
               </select>
             </label>
             <label>
@@ -566,10 +569,9 @@ export function BulkMask() {
             </label>
           </div>
           <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
-            Scanned bills and photo PDFs are OCR’d with Tesseract in your
-            browser, then sensitive fields are blacked out. First OCR run may
-            download language data. Large folders of scans are slower — use
-            parallel jobs = 1–2.
+            Default mask uses <strong>asterisks</strong> (e.g. phone 555-1234 →
+            ***-****). Blur uses a soft mosaic. Scanned PDFs use OCR first; the
+            first run may download language data.
           </p>
 
           <h2 className="bulk-section-title">3. Where to save</h2>

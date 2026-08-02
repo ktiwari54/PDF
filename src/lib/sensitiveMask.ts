@@ -2,7 +2,7 @@
  * Bulk sensitive-data masking for dragonPDF.
  * Detects PII / business identifiers via regex and covers them on the PDF.
  */
-import { PDFDocument, rgb } from '@cantoo/pdf-lib'
+import { PDFDocument, rgb, StandardFonts } from '@cantoo/pdf-lib'
 import * as pdfjs from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
 
@@ -29,8 +29,13 @@ export type MaskOptions = {
   lastNames?: string
   /** Extra custom regex patterns (one per line, without /flags/) */
   customPatterns?: string
-  /** Black bar vs whiteout */
-  style?: 'black' | 'white' | 'blur'
+  /**
+   * How to hide sensitive data:
+   * - asterisk: replace with **** (keeps rough length; refined look)
+   * - blur: soft pixel mosaic over the region
+   * - black / white: solid redaction bars
+   */
+  style?: 'asterisk' | 'blur' | 'black' | 'white'
   /** Padding around matches (normalized fraction of page when OCR; points-ish for text) */
   pad?: number
   /**
@@ -335,35 +340,37 @@ export async function maskSensitivePdf(
       : `Applying ${boxes.length} redaction(s)…`,
   )
 
-  // Apply covers with pdf-lib (non-destructive overlay)
+  // Apply refined masks with pdf-lib (overlay; original structure kept)
   const doc = await PDFDocument.load(data, { ignoreEncryption: true })
   const pages = doc.getPages()
-  const style = options.style || 'black'
-  const fill =
-    style === 'white'
-      ? rgb(1, 1, 1)
-      : style === 'blur'
-        ? rgb(0.85, 0.85, 0.85)
-        : rgb(0, 0, 0)
+  const style = options.style || 'asterisk'
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold)
 
   for (const box of boxes) {
     const page = pages[box.page]
     if (!page) continue
     const { width: W, height: H } = page.getSize()
-    const x = box.x * W
-    const h = box.h * H
-    const y = H - (box.y + box.h) * H
-    const w = box.w * W
+    const x = clamp(box.x * W, 0, W)
+    const h = clamp(box.h * H, 1, H)
+    const w = clamp(box.w * W, 1, W)
+    const y = clamp(H - (box.y + box.h) * H, 0, H)
 
-    page.drawRectangle({
-      x: clamp(x, 0, W),
-      y: clamp(y, 0, H),
-      width: clamp(w, 1, W),
-      height: clamp(h, 1, H),
-      color: fill,
-      borderWidth: 0,
-      opacity: style === 'blur' ? 0.92 : 1,
-    })
+    if (style === 'asterisk') {
+      applyAsteriskMask(page, font, fontBold, x, y, w, h, box.text)
+    } else if (style === 'blur') {
+      applyBlurMosaic(page, x, y, w, h)
+    } else {
+      const fill = style === 'white' ? rgb(1, 1, 1) : rgb(0, 0, 0)
+      page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        color: fill,
+        borderWidth: 0,
+      })
+    }
   }
 
   const bytes = await doc.save({ useObjectStreams: false })
@@ -372,6 +379,132 @@ export async function maskSensitivePdf(
     hits,
     hitCount: hits.length,
   }
+}
+
+/** Cover original glyphs, then draw asterisks (numbers/letters → ****) */
+function applyAsteriskMask(
+  page: import('@cantoo/pdf-lib').PDFPage,
+  font: import('@cantoo/pdf-lib').PDFFont,
+  fontBold: import('@cantoo/pdf-lib').PDFFont,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  sampleText: string,
+) {
+  // White cover so underlying digits aren't readable
+  page.drawRectangle({
+    x: x - 0.5,
+    y: y - 0.5,
+    width: w + 1,
+    height: h + 1,
+    color: rgb(1, 1, 1),
+    borderWidth: 0,
+  })
+
+  // Build mask string: keep separators, replace alphanumerics with *
+  // e.g. 555-123-4567 → ***-***-**** , email@x.com → *****@*.***
+  const masked = toAsteriskString(sampleText)
+  const fontSize = Math.max(6, Math.min(h * 0.85, 28))
+  const useFont = fontBold
+  let drawText = masked
+  let textW = useFont.widthOfTextAtSize(drawText, fontSize)
+
+  // Fit asterisks into the box width
+  if (textW > w * 0.98 && drawText.length > 1) {
+    // Prefer shrinking size first
+    let size = fontSize
+    while (size > 5 && useFont.widthOfTextAtSize(drawText, size) > w * 0.98) {
+      size -= 0.5
+    }
+    textW = useFont.widthOfTextAtSize(drawText, size)
+    if (textW > w * 0.98) {
+      // Truncate with enough stars to fill
+      const starW = useFont.widthOfTextAtSize('*', size)
+      const n = Math.max(3, Math.floor(w / Math.max(starW, 1)))
+      drawText = '*'.repeat(n)
+      textW = useFont.widthOfTextAtSize(drawText, size)
+    }
+    const baseline = y + (h - size) * 0.35
+    page.drawText(drawText, {
+      x: x + Math.max(0, (w - textW) / 2),
+      y: Math.max(y + 1, baseline),
+      size,
+      font: useFont,
+      color: rgb(0.15, 0.15, 0.15),
+    })
+    return
+  }
+
+  const baseline = y + (h - fontSize) * 0.35
+  page.drawText(drawText, {
+    x: x + Math.max(0, (w - textW) / 2),
+    y: Math.max(y + 1, baseline),
+    size: fontSize,
+    font: useFont,
+    color: rgb(0.15, 0.15, 0.15),
+  })
+  void font
+}
+
+/** Replace letters/digits with *; keep @ . - / spaces and similar structure */
+export function toAsteriskString(raw: string): string {
+  if (!raw || !raw.trim()) return '****'
+  return raw.replace(/[A-Za-z0-9]/g, '*')
+}
+
+/** Soft mosaic blur: small gray tiles of varying shade */
+function applyBlurMosaic(
+  page: import('@cantoo/pdf-lib').PDFPage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  // Base soft cover
+  page.drawRectangle({
+    x,
+    y,
+    width: w,
+    height: h,
+    color: rgb(0.82, 0.82, 0.84),
+    borderWidth: 0,
+  })
+
+  const tile = Math.max(2.5, Math.min(w, h) / 6)
+  const cols = Math.max(1, Math.ceil(w / tile))
+  const rows = Math.max(1, Math.ceil(h / tile))
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      // Deterministic pseudo-random shade from position
+      const n = ((r * 17 + c * 31 + Math.floor(x) + Math.floor(y)) % 40) / 100
+      const g = 0.55 + n
+      const tw = Math.min(tile, x + w - (x + c * tile))
+      const th = Math.min(tile, y + h - (y + r * tile))
+      if (tw <= 0.5 || th <= 0.5) continue
+      page.drawRectangle({
+        x: x + c * tile,
+        y: y + r * tile,
+        width: tw,
+        height: th,
+        color: rgb(g, g, g + 0.02),
+        borderWidth: 0,
+        opacity: 0.85,
+      })
+    }
+  }
+
+  // Light frost overlay
+  page.drawRectangle({
+    x,
+    y,
+    width: w,
+    height: h,
+    color: rgb(0.9, 0.9, 0.92),
+    borderWidth: 0,
+    opacity: 0.25,
+  })
 }
 
 function extractTextItems(
@@ -612,7 +745,7 @@ export function defaultMaskOptions(): MaskOptions {
     categories,
     lastNames: '',
     customPatterns: '',
-    style: 'black',
+    style: 'asterisk',
     pad: 1.5,
     ocrMode: 'auto',
     ocrLang: 'eng',
