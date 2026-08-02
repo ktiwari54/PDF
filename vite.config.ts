@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// GitHub Pages project site: https://ktiwari54.github.io/PDF/
+// Vercel / local: base '/'
+// GitHub Pages project site only when GITHUB_PAGES=true
 export default defineConfig({
   plugins: [react()],
-  base: process.env.GITHUB_ACTIONS ? '/PDF/' : '/',
+  base: process.env.GITHUB_PAGES === 'true' ? '/PDF/' : '/',
   optimizeDeps: {
     include: ['pdfjs-dist', '@cantoo/pdf-lib'],
   },
