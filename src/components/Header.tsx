@@ -14,10 +14,10 @@ export function Header() {
         </Link>
         <nav className="nav-links">
           <Link to="/editor">Live Edit</Link>
+          <Link to="/ppt-maker">PPT Maker</Link>
           <Link to="/tools/merge-pdf">Merge</Link>
           <Link to="/tools/split-pdf">Split</Link>
           <Link to="/tools/compress-pdf">Compress</Link>
-          <Link to="/#convert">Convert</Link>
           <Link to="/">All tools</Link>
         </nav>
         <div className="header-spacer" />

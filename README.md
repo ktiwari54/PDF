@@ -16,8 +16,9 @@ Open http://127.0.0.1:5173
 
 ## Features
 
-33 tools across Organize · Optimize · Convert · Edit · Security · Intelligence.  
-All processing stays on your device.
+33+ tools across Organize · Optimize · Convert · Edit · Security · Intelligence.  
+**AI PPT Maker** — create professional `.pptx` decks from a text prompt (themes, agenda, content).  
+All core PDF processing stays on your device.
 
 ## Stack
 

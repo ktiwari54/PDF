@@ -3,8 +3,14 @@ import type { ToolDef } from '../data/tools'
 import { ToolIcon } from './ToolIcon'
 
 export function ToolCard({ tool }: { tool: ToolDef }) {
+  const href =
+    tool.id === 'edit-pdf'
+      ? '/editor'
+      : tool.id === 'ppt-maker'
+        ? '/ppt-maker'
+        : `/tools/${tool.id}`
   return (
-    <Link to={`/tools/${tool.id}`} className="tool-card">
+    <Link to={href} className="tool-card">
       {tool.badge && <span className="badge">{tool.badge}</span>}
       <ToolIcon name={tool.icon} color={tool.color} />
       <h3>{tool.name}</h3>

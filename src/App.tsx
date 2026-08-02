@@ -3,6 +3,7 @@ import { Header } from './components/Header'
 import { Home } from './pages/Home'
 import { ToolPage } from './pages/ToolPage'
 import { LiveEditor } from './pages/LiveEditor'
+import { PptMaker } from './pages/PptMaker'
 
 export default function App() {
   const location = useLocation()
@@ -24,6 +25,8 @@ export default function App() {
       <Header />
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/ppt-maker" element={<PptMaker />} />
+        <Route path="/tools/ppt-maker" element={<PptMaker />} />
         <Route path="/tools/:toolId" element={<ToolPage />} />
         <Route path="/editor" element={<LiveEditor />} />
       </Routes>

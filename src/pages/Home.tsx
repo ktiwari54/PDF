@@ -44,9 +44,20 @@ export function Home() {
           Live-edit without breaking fonts or layout. Merge, compress, convert,
           and protect — private, in your browser.
         </p>
-        <div style={{ marginTop: '1.1rem' }}>
+        <div
+          style={{
+            marginTop: '1.1rem',
+            display: 'flex',
+            gap: '0.6rem',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
           <Link to="/editor" className="btn btn-primary">
             Open Live Editor
+          </Link>
+          <Link to="/ppt-maker" className="btn btn-ghost">
+            AI PPT Maker
           </Link>
         </div>
         <div className="search-bar">

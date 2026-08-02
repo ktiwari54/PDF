@@ -390,6 +390,18 @@ export const tools: ToolDef[] = [
 
   // Intelligence
   {
+    id: 'ppt-maker',
+    name: 'AI PPT Maker',
+    description:
+      'Create a professional PowerPoint from a prompt — themes, agenda, content slides, and download as .pptx.',
+    category: 'intelligence',
+    color: '#f07a28',
+    icon: 'ppt-maker',
+    accept: '*/*',
+    multiple: false,
+    badge: 'New!',
+  },
+  {
     id: 'ai-summarizer',
     name: 'AI Summarizer',
     description:

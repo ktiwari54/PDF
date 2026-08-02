@@ -70,6 +70,7 @@ const map: Record<string, LucideIcon> = {
   summarize: Sparkles,
   translate: Languages,
   markdown: FileCode,
+  'ppt-maker': Presentation,
 }
 
 export function ToolIcon({
