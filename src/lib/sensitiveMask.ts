@@ -405,34 +405,27 @@ export function buildMatchers(options: MaskOptions): {
   ])
 
   add('website', [
-    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9][-a-z0-9]{1,40}\.(?:com|net|org|ae|io|co|uk|in|biz|info)(?:\/[^\s]*)?/gi,
-    /\b(?:Website|Web|URL)[:\s#]+[^\s\n]{4,60}/gi,
+    // Only labeled websites — bare domain match blanks half the invoice
+    /\b(?:Website|Web\s*site|URL|Web)[:\s#]+(?:https?:\/\/)?(?:www\.)?[a-z0-9][-a-z0-9.]{2,50}/gi,
   ])
 
   add('signature', [
-    /\b(?:Authorized\s*Signature|Authorised\s*Signature|Signature|Signed\s*by|For\s+[A-Z][A-Za-z\s&]{2,40}$)/gi,
+    /\b(?:Authorized\s*Signature|Authorised\s*Signature|Authorised\s*Signatory|Authorized\s*Signatory)\b/gi,
     /\b(?:Digitally\s*signed|E\-?Sign(?:ature)?)\b/gi,
   ])
 
   add('qrCode', [
-    /\b(?:QR\s*Code|QRCode|Scan\s*(?:QR|code)|e\-?Invoice\s*QR|UAE\s*QR|FTA\s*QR)\b/gi,
+    /\b(?:QR\s*Code|QRCode|e\-?Invoice\s*QR|UAE\s*QR|FTA\s*QR)\b/gi,
   ])
 
   add('barcode', [
-    /\b(?:Barcode|Bar\s*Code|Bar\-Code)\b/gi,
+    /\b(?:Barcode|Bar\s*Code)\b/gi,
   ])
 
-  // —— Bill / invoice money amounts ——
+  // —— Bill amounts: ONLY with currency symbol or strong labels (not every number) ——
   add('amount', [
-    // Currency symbols & codes
-    /(?:USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|BHD|CAD|AUD|\$|€|£|₹|¥|د\.إ)\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,3})?\b/gi,
-    // 1,234.56 or 1.234,56 style totals
-    /\b\d{1,3}(?:[, ]\d{3})+(?:\.\d{2})\b/g,
-    /\b\d{1,3}(?:\.\d{3})+(?:,\d{2})\b/g,
-    // Labeled bill amounts
-    /\b(?:amount|amt\.?|sub\s*total|subtotal|total|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|total\s*payable|paid|payment|invoice\s*value|taxable\s*value|tax\s*amount|vat\s*amount|gst\s*amount|cgst|sgst|igst|discount|freight|shipping\s*charges?|unit\s*price|rate|price|qty\s*total|line\s*total|net\s*amount|gross\s*amount)[:\s]*[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2,3})?/gi,
-    // Standalone money-like decimals often on bills (careful min digits)
-    /(?<![A-Za-z])\d{2,7}[.,]\d{2}(?!\d)/g,
+    /(?:USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|BHD|\$|€|£|₹)\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/gi,
+    /\b(?:sub\s*total|subtotal|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|invoice\s*value|taxable\s*value|tax\s*amount|vat\s*amount|gst\s*amount|net\s*amount|gross\s*amount)[:\s]*[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2})?/gi,
   ])
 
   // —— Invoice / bill / receipt IDs ——
@@ -457,36 +450,27 @@ export function buildMatchers(options: MaskOptions): {
   ])
 
   add('swift', [
+    // Labeled only — bare 8-letter codes match random invoice words
     /\b(?:SWIFT|BIC|Swift\s*Code|BIC\s*Code)[:\s#]*[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi,
-    /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g,
   ])
 
-  // Combined tax registration (UAE TRN = 15 digits, etc.)
+  // Tax registration — labeled values only (not every long number)
   add('taxId', [
     /\b(?:TRN|Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*No\.?)[:\s#]*\d{9,15}\b/gi,
     /\b(?:VAT|V\.A\.T\.|GST|GSTIN|TIN)[:\s#]*[A-Z0-9]{8,18}\b/gi,
-    /\b\d{15}\b/g, // UAE TRN often 15 digits
   ])
 
-  // Person + company security / registration numbers
+  // Person + company security / registration — prefer labeled
   add('ssn', [
-    /\b\d{3}-\d{2}-\d{4}\b/g, // US SSN
-    /\b\d{3}\s\d{2}\s\d{4}\b/g,
-    /\b(?:SSN|Social Security|National ID|Aadhaar|Aadhar|Emirates ID|IQAMA|Civil ID|Passport\s*No\.?|National\s*Insurance)[:\s#]*[A-Za-z0-9\-\s]{5,22}/gi,
-    /\b\d{4}\s\d{4}\s\d{4}\b/g, // Aadhaar-like
-    // Company registration / security IDs
-    /\b(?:CIN|Corporate\s*Identity\s*(?:No\.?|Number)|Company\s*(?:Reg(?:istration)?\.?\s*)?(?:No\.?|Number)|CR\s*(?:No\.?|Number)|Commercial\s*Registration|Registration\s*(?:No\.?|Number)|Reg\.?\s*No\.?|EIN|Employer\s*ID|D\-?U\-?N\-?S|DUNS|UEN|BRN|Business\s*Reg(?:istration)?\.?\s*(?:No\.?|Number)|Company\s*Number|Co\.?\s*Reg\.?\s*No\.?|PAN|TAN|DIN|MSME|Udyam|IEC|Import\s*Export\s*Code)[:\s#]*[A-Z0-9\-\/]{5,25}/gi,
-    // India CIN: L12345MH2020PLC123456
-    /\b[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}\b/g,
-    // US EIN 12-3456789
-    /\b\d{2}-\d{7}\b/g,
-    // PAN (India person/company)
-    /\b[A-Z]{5}\d{4}[A-Z]\b/g,
+    /\b\d{3}-\d{2}-\d{4}\b/g,
+    /\b(?:SSN|Social Security|National ID|Aadhaar|Aadhar|Emirates ID|IQAMA|Civil ID|Passport\s*No\.?)[:\s#]*[A-Za-z0-9\-\s]{5,22}/gi,
+    /\b\d{4}\s\d{4}\s\d{4}\b/g,
+    /\b(?:CIN|Corporate\s*Identity\s*(?:No\.?|Number)|Company\s*Reg(?:istration)?\.?\s*(?:No\.?|Number)|CR\s*(?:No\.?|Number)|Commercial\s*Registration|EIN|Employer\s*ID|DUNS|UEN|BRN|Business\s*Reg(?:istration)?\.?\s*(?:No\.?|Number)|PAN|TAN|DIN|IEC)[:\s#]*[A-Z0-9\-\/]{5,25}/gi,
+    /\b[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}\b/g, // India CIN structure
   ])
 
   add('vat', [
     /\b(?:VAT|V\.A\.T\.|VAT\s*(?:No\.?|Number|Reg\.?|Registration)|Tax\s*ID|TIN|TRN|Tax\s*Reg(?:istration)?\.?\s*(?:No\.?|Number))[:\s#]*[A-Z0-9]{6,18}\b/gi,
-    /\b(?:AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|GB|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|AE|SA)[A-Z0-9]{8,14}\b/g,
   ])
 
   add('gst', [
@@ -656,15 +640,25 @@ export async function maskSensitivePdf(
     const page = pages[box.page]
     if (!page) continue
     const { width: W, height: H } = page.getSize()
-    // Expand QR / barcode / signature removal regions
-    let expand = 0
-    if (box.category === 'qrCode') expand = 0.06
-    if (box.category === 'barcode') expand = 0.04
-    if (box.category === 'signature') expand = 0.03
-    const bx = Math.max(0, box.x - expand)
-    const by = Math.max(0, box.y - expand)
-    const bw = Math.min(1 - bx, box.w + expand * 2)
-    const bh = Math.min(1 - by, box.h + expand * 2 + (box.category === 'qrCode' ? 0.08 : 0))
+    // Small expand only for QR/barcode (below label), never wipe whole page
+    let expandX = 0
+    let expandY = 0
+    let expandH = 0
+    if (box.category === 'qrCode') {
+      expandX = 0.02
+      expandH = 0.1 // square-ish area under "QR Code" label
+    } else if (box.category === 'barcode') {
+      expandX = 0.03
+      expandH = 0.035
+    } else if (box.category === 'signature') {
+      expandX = 0.02
+      expandH = 0.045
+    }
+    const bx = Math.max(0, box.x - expandX)
+    const by = Math.max(0, box.y - expandY)
+    // Cap every mask box so we never cover most of the invoice
+    const bw = Math.min(0.55, Math.min(1 - bx, box.w + expandX * 2))
+    const bh = Math.min(0.12, Math.min(1 - by, box.h + expandH))
 
     const padX = 1.2
     const padY = 0.8
@@ -761,18 +755,15 @@ function mergeBoxes(boxes: Box[]): Box[] {
 
 function boxesOverlapOrNear(a: Box, b: Box): boolean {
   if (a.page !== b.page) return false
-  // Expand slightly so neighbors on the same line merge
-  const padX = 0.012
-  const padY = 0.008
-  const ax1 = a.x - padX
-  const ay1 = a.y - padY
-  const ax2 = a.x + a.w + padX
-  const ay2 = a.y + a.h + padY
-  const bx1 = b.x
-  const by1 = b.y
-  const bx2 = b.x + b.w
-  const by2 = b.y + b.h
-  return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1
+  // Only merge tight neighbors on the SAME line — never stack vertical blocks
+  const sameLine = Math.abs(a.y - b.y) < 0.012 && Math.abs(a.h - b.h) < 0.02
+  if (!sameLine) return false
+  const gap = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w))
+  if (gap > 0.02) return false
+  // Don't create huge merged strips
+  const mergedW =
+    Math.max(a.x + a.w, b.x + b.w) - Math.min(a.x, b.x)
+  return mergedW <= 0.5
 }
 
 /** Professional bill mask: Customer A, INV-XXXXX, remove QR, etc. */
@@ -1114,10 +1105,11 @@ function detectResumePersonNames(items: TextItem[]): TextItem[] {
   for (const line of lineInfos) {
     // Must be in top ~22% of page (resume header zone)
     if (line.y > 0.22) continue
-    // Prefer larger-than-average or max-ish font
     const large =
-      line.fontH >= avgFont * 1.25 || line.fontH >= maxFont * 0.85
-    if (!large && line.y > 0.08) continue
+      line.fontH >= avgFont * 1.35 || line.fontH >= maxFont * 0.9
+    if (!large) continue
+    // Must be name-sized, not a full-width banner
+    if (line.w > 0.55 || line.text.length > 45) continue
 
     if (!looksLikePersonName(line.text)) continue
 
@@ -1125,7 +1117,7 @@ function detectResumePersonNames(items: TextItem[]): TextItem[] {
       str: line.text,
       x: line.x,
       y: line.y,
-      w: Math.max(line.w, 0.08),
+      w: Math.min(Math.max(line.w, 0.08), 0.45),
       h: Math.max(line.h, line.fontH, 0.015),
       fontH: line.fontH,
     })
@@ -1332,12 +1324,22 @@ function collectMatches(
     w: number,
     h: number,
   ) => {
+    // Hard caps: field-sized masks only — never blank the whole invoice
+    let bw = Math.min(w + pad * 2, 0.52)
+    let bh = Math.min(h + pad * 2, 0.1)
+    if (category === 'qrCode') bh = Math.min(bh + 0.08, 0.14)
+    if (category === 'barcode') bh = Math.min(bh + 0.03, 0.08)
+    if (category === 'signature') bh = Math.min(bh + 0.04, 0.1)
+    // Reject absurdly large regions (bad multi-line joins)
+    if (bw > 0.7 || bh > 0.18) return
+    if (bw < 0.01 || bh < 0.006) return
+
     const box: Box = {
       page: pageIndex,
-      x: Math.max(0, x - pad),
-      y: Math.max(0, y - pad),
-      w: Math.min(1, w + pad * 2),
-      h: Math.min(1, h + pad * 2),
+      x: Math.max(0, Math.min(x - pad, 1 - bw)),
+      y: Math.max(0, Math.min(y - pad, 1 - bh)),
+      w: bw,
+      h: bh,
       category,
       text: text.slice(0, 80),
     }
@@ -1353,17 +1355,19 @@ function collectMatches(
     hits.push({ page: pageIndex + 1, category, text: text.slice(0, 80) })
   }
 
-  // Auto-detect resume / document person name (large heading near top)
-  if (on.lastName !== false && on.lastName) {
+  // Resume heading names only when person-name category is on (not on bills unless chosen)
+  if (on.lastName) {
     for (const n of detectResumePersonNames(items)) {
-      pushBox('lastName', n.str, n.x, n.y, n.w, n.h)
+      // Cap width — name only, not whole header bar
+      pushBox('lastName', n.str, n.x, n.y, Math.min(n.w, 0.45), n.h)
     }
   }
 
-  // Auto-detect prominent company letterhead (top of page, company-like)
+  // Letterhead company: short line with legal suffix only
   if (on.companyName) {
     for (const n of detectLetterheadCompany(items)) {
-      pushBox('companyName', n.str, n.x, n.y, n.w, n.h)
+      if (n.w > 0.5 || n.str.length > 60) continue
+      pushBox('companyName', n.str, n.x, n.y, Math.min(n.w, 0.48), n.h)
     }
   }
 
@@ -1393,14 +1397,30 @@ function collectMatches(
   const matchOnSpan = (
     span: { str: string; x: number; y: number; w: number; h: number }[],
   ) => {
-    const joined = span.map((i) => i.str).join('')
     const spaced = span.map((i) => i.str).join(' ')
-    for (const text of [joined, spaced]) {
+    const joined = span.map((i) => i.str).join('')
+    for (const text of [spaced, joined]) {
       for (const { category, re } of matchers) {
         re.lastIndex = 0
         const match = re.exec(text)
         if (!match) continue
-        // Prefer covering the matched segment when possible — cover full span bbox
+
+        // Prefer individual tokens that match — avoids wiping whole invoice lines
+        let hitItem = false
+        for (const it of span) {
+          re.lastIndex = 0
+          if (re.test(it.str)) {
+            re.lastIndex = 0
+            pushBox(category, it.str.trim(), it.x, it.y, it.w, it.h)
+            hitItem = true
+          }
+        }
+        if (hitItem) continue
+
+        // Only use full-line box if match is most of the line (short field line)
+        if (match[0].length < text.length * 0.45 && text.length > 28) continue
+        if (text.length > 90) continue
+
         const minX = Math.min(...span.map((i) => i.x))
         const maxX = Math.max(...span.map((i) => i.x + i.w))
         const minY = Math.min(...span.map((i) => i.y))
@@ -1410,54 +1430,36 @@ function collectMatches(
     }
   }
 
+  // Single lines only (no multi-line blocks — those blanked whole invoices)
   for (const line of lines) {
     matchOnSpan(line)
   }
 
-  // Multi-line blocks (company + address often wrap 2–4 lines on invoices)
-  for (let i = 0; i < lines.length; i++) {
-    for (let len = 2; len <= 4 && i + len <= lines.length; len++) {
-      const block = lines.slice(i, i + len).flat()
-      matchOnSpan(block)
-    }
-  }
-
-  // If a line is only a label, mask the following value lines
-  const labelRules: { re: RegExp; cat: MaskCategory; follow: number }[] = [
+  // Label on its own line → mask ONLY the next short value line
+  const labelRules: { re: RegExp; cat: MaskCategory }[] = [
     {
-      re: /^(?:Company\s*Name|Business\s*Name|Company|Vendor|Supplier|Seller|From)\s*[:#]?\s*$/i,
+      re: /^(?:Company\s*Name|Business\s*Name|Vendor|Supplier|Seller|From)\s*[:#]?\s*$/i,
       cat: 'companyName',
-      follow: 2,
     },
     {
-      re: /^(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer|Client|Buyer|Consignee|Customer\s*Name)\s*[:#]?\s*$/i,
+      re: /^(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer\s*Name|Client\s*Name|Customer|Client|Buyer)\s*[:#]?\s*$/i,
       cat: 'customerName',
-      follow: 3,
     },
     {
       re: /^(?:Billing\s*Address|Shipping\s*Address|Customer\s*Address|Delivery\s*Address)\s*[:#]?\s*$/i,
       cat: 'customerAddress',
-      follow: 3,
     },
     {
       re: /^(?:Registered\s*Office|Company\s*Address|Office\s*Address|Head\s*Office)\s*[:#]?\s*$/i,
       cat: 'companyAddress',
-      follow: 3,
     },
     {
-      re: /^(?:Address|Location)\s*[:#]?\s*$/i,
-      cat: 'address',
-      follow: 3,
-    },
-    {
-      re: /^(?:Bank\s*Name|Bank|Account\s*Name|Beneficiary|IBAN)\s*[:#]?\s*$/i,
+      re: /^(?:IBAN|Account\s*No\.?|Account\s*Number|A\/C\s*No\.?)\s*[:#]?\s*$/i,
       cat: 'bankAccount',
-      follow: 2,
     },
     {
-      re: /^(?:SWIFT|BIC)\s*[:#]?\s*$/i,
+      re: /^(?:SWIFT|BIC|Swift\s*Code)\s*[:#]?\s*$/i,
       cat: 'swift',
-      follow: 1,
     },
   ]
   for (let i = 0; i < lines.length - 1; i++) {
@@ -1465,18 +1467,21 @@ function collectMatches(
     for (const rule of labelRules) {
       if (!rule.re.test(lineText)) continue
       if (!matchers.some((m) => m.category === rule.cat)) continue
-      const follow = lines.slice(i + 1, i + 1 + rule.follow).flat()
-      if (!follow.length) continue
-      const minX = Math.min(...follow.map((t) => t.x))
-      const maxX = Math.max(...follow.map((t) => t.x + t.w))
-      const minY = Math.min(...follow.map((t) => t.y))
-      const maxY = Math.max(...follow.map((t) => t.y + t.h))
-      const text = follow
+      const next = lines[i + 1]
+      if (!next?.length) continue
+      const text = next
         .map((t) => t.str)
         .join(' ')
         .trim()
-      if (text.length < 2) continue
-      pushBox(rule.cat, text, minX, minY, maxX - minX, maxY - minY)
+      // Value line must be short (one field), not a paragraph of the invoice
+      if (text.length < 2 || text.length > 70) continue
+      const minX = Math.min(...next.map((t) => t.x))
+      const maxX = Math.max(...next.map((t) => t.x + t.w))
+      const minY = Math.min(...next.map((t) => t.y))
+      const maxY = Math.max(...next.map((t) => t.y + t.h))
+      const w = maxX - minX
+      if (w > 0.55) continue
+      pushBox(rule.cat, text, minX, minY, w, maxY - minY)
     }
   }
 }
