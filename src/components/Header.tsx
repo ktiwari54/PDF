@@ -17,7 +17,7 @@ export function Header() {
             Bulk PDF Masker
           </Link>
           <Link to="/editor">Live Edit</Link>
-          <Link to="/ppt-maker">PPT Maker</Link>
+          <Link to="/ppt-maker">CEO PPT</Link>
           <Link to="/tools/merge-pdf">Merge</Link>
           <Link to="/tools/split-pdf">Split</Link>
           <Link to="/">All tools</Link>

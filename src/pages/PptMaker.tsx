@@ -4,9 +4,10 @@ import {
   Presentation,
   Sparkles,
   Download,
-  Wand2,
   ArrowLeft,
   LayoutTemplate,
+  Image as ImageIcon,
+  Crown,
 } from 'lucide-react'
 import {
   PPT_THEMES,
@@ -19,32 +20,31 @@ import {
 import { downloadBlob, baseName } from '../lib/pdfOps'
 
 const TONES = [
-  { id: 'professional', label: 'Professional' },
-  { id: 'pitch', label: 'Pitch / Investor' },
-  { id: 'training', label: 'Training' },
-  { id: 'report', label: 'Report / Briefing' },
+  { id: 'pitch', label: 'Investor / Pitch' },
+  { id: 'professional', label: 'CEO / Board' },
+  { id: 'report', label: 'Exec Report' },
+  { id: 'training', label: 'Leadership Training' },
 ] as const
 
 const COUNTS = [
-  { id: 'auto', label: 'Auto' },
-  { id: '6', label: '6 slides' },
-  { id: '8', label: '8 slides' },
+  { id: 'auto', label: 'Auto (10–14)' },
   { id: '10', label: '10 slides' },
   { id: '12', label: '12 slides' },
+  { id: '14', label: '14 slides' },
 ] as const
 
 const EXAMPLES = [
-  'Q3 product launch plan for a fintech mobile app: market, features, GTM, metrics, risks, and ask.',
-  'Employee onboarding training: company culture, tools, security policies, first 30 days checklist.',
-  'Climate tech investor pitch: problem, solution, traction, business model, team, and funding ask.',
+  'Series A pitch for an AI-powered invoice automation SaaS: problem, solution, market, product, GTM, traction, unit economics, team, and $8M raise.',
+  'CEO board update on Middle East expansion: performance, risks, capital plan, competitive moves, and decisions required this quarter.',
+  'Enterprise digital transformation roadmap for a logistics group: current state, workstreams, ROI, governance, and 90-day plan.',
 ]
 
 export function PptMaker() {
   const [prompt, setPrompt] = useState('')
-  const [author, setAuthor] = useState('dragonPDF')
-  const [tone, setTone] = useState<(typeof TONES)[number]['id']>('professional')
+  const [author, setAuthor] = useState('Executive Team')
+  const [tone, setTone] = useState<(typeof TONES)[number]['id']>('pitch')
   const [slideCount, setSlideCount] = useState<string>('auto')
-  const [themeId, setThemeId] = useState<PptThemeId>('dragon')
+  const [themeId, setThemeId] = useState<PptThemeId>('boardroom')
   const [outline, setOutline] = useState<DeckOutline | null>(null)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
@@ -68,16 +68,15 @@ export function PptMaker() {
     setStatus(null)
     setBusy(true)
     try {
+      setStatus('Building CEO-level narrative from your prompt…')
       let deck = outlineFromPrompt(prompt, {
         author,
         tone,
+        ceoMode: true,
         slideCount:
           slideCount === 'auto' ? 'auto' : Number(slideCount) || 'auto',
       })
       setOutline(deck)
-      setStatus(
-        `Outline ready · ${deck.slides.length} slides. ${useAi && apiKey ? 'Enhancing…' : 'Building PPTX…'}`,
-      )
 
       if (useAi && apiKey.trim()) {
         try {
@@ -89,12 +88,12 @@ export function PptMaker() {
         setOutline(deck)
       }
 
-      setStatus('Creating PowerPoint file…')
-      const blob = await buildPptx(deck, themeId)
-      const name = `${baseName(deck.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'presentation')}_dragonPDF.pptx`
+      setStatus('Composing slides and fetching executive visuals (no token)…')
+      const blob = await buildPptx(deck, themeId, setStatus)
+      const name = `${baseName(deck.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'executive-deck')}_CEO_dragonPDF.pptx`
       downloadBlob(blob, name)
       setStatus(
-        `Done — ${deck.slides.length} slides downloaded as ${name}`,
+        `Done — ${deck.slides.length} slides with images · ${name}`,
       )
     } catch (e) {
       console.error(e)
@@ -109,10 +108,10 @@ export function PptMaker() {
     setBusy(true)
     setError(null)
     try {
-      const blob = await buildPptx(outline, themeId)
+      const blob = await buildPptx(outline, themeId, setStatus)
       downloadBlob(
         blob,
-        `${baseName(outline.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'presentation')}_dragonPDF.pptx`,
+        `${baseName(outline.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'executive-deck')}_CEO_dragonPDF.pptx`,
       )
       setStatus('PPTX downloaded again.')
     } catch (e) {
@@ -129,14 +128,14 @@ export function PptMaker() {
       </Link>
 
       <div className="tool-page-header">
-        <div className="tool-icon" style={{ background: '#f07a28' }}>
-          <Presentation size={26} color="#fff" />
+        <div className="tool-icon" style={{ background: '#C9A227' }}>
+          <Crown size={26} color="#0A0F1C" />
         </div>
         <div>
-          <h1>AI PPT Maker</h1>
+          <h1>CEO PPT Maker</h1>
           <p>
-            Describe your deck in a prompt — dragonPDF builds a professional
-            PowerPoint (.pptx) with title, agenda, content, and closing slides.
+            One prompt → board-ready PowerPoint with executive structure,
+            metrics, timeline, and stock photography. <strong>No API token required.</strong>
           </p>
         </div>
       </div>
@@ -144,33 +143,33 @@ export function PptMaker() {
       <div className="ppt-grid">
         <section className="workspace ppt-panel">
           <label className="ppt-label">
-            Your prompt
+            Your brief (one prompt)
             <textarea
               className="ppt-prompt"
               rows={8}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Example: Create a pitch deck for a B2B SaaS analytics product targeting mid-market retailers. Cover problem, solution, market size, product demo highlights, pricing, traction, go-to-market, team, and the funding ask."
+              placeholder="Describe the audience, goal, and what the deck must cover. Example: Series A pitch for AI invoice SaaS — problem, solution, market, product, GTM, traction, unit economics, team, $8M raise."
             />
           </label>
 
           <div className="ppt-examples">
-            <span className="muted">Try an example:</span>
+            <span className="muted">Try:</span>
             {EXAMPLES.map((ex) => (
               <button
-                key={ex.slice(0, 24)}
+                key={ex.slice(0, 28)}
                 type="button"
                 className="ppt-chip"
                 onClick={() => setPrompt(ex)}
               >
-                {ex.slice(0, 48)}…
+                {ex.slice(0, 52)}…
               </button>
             ))}
           </div>
 
           <div className="ppt-controls">
             <label>
-              Tone
+              Deck type
               <select
                 value={tone}
                 onChange={(e) =>
@@ -198,11 +197,11 @@ export function PptMaker() {
               </select>
             </label>
             <label>
-              Presenter / brand
+              Presenter
               <input
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
-                placeholder="Your name or company"
+                placeholder="CEO / Company name"
               />
             </label>
           </div>
@@ -235,6 +234,18 @@ export function PptMaker() {
             </div>
           </div>
 
+          <div className="bulk-keep-note">
+            <strong>
+              <ImageIcon size={14} style={{ verticalAlign: -2 }} /> Included
+              automatically (no token)
+            </strong>
+            <span>
+              Executive title · Agenda · KPI snapshot · Image+text layouts ·
+              Two-column analysis · Priority cards · 90-day roadmap · Leadership
+              takeaway · Closing · Stock photography matched to your topic
+            </span>
+          </div>
+
           <div className="ppt-ai-box">
             <label className="le-check">
               <input
@@ -242,35 +253,20 @@ export function PptMaker() {
                 checked={useAi}
                 onChange={(e) => setUseAi(e.target.checked)}
               />
-              <span>
-                <Wand2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-                Optional AI polish (xAI / SpaceXAI API key)
-              </span>
+              <span>Optional AI polish (only if you have an xAI key)</span>
             </label>
             {useAi && (
               <label>
-                API key (stored only in this browser)
+                API key (browser only)
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="xai-…"
+                  placeholder="xai-… (optional)"
                   autoComplete="off"
                 />
               </label>
             )}
-            <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              Works fully offline without a key. With a key from{' '}
-              <a
-                href="https://console.x.ai"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--accent-gold)' }}
-              >
-                console.x.ai
-              </a>
-              , content is refined by the model.
-            </p>
           </div>
 
           <div className="actions">
@@ -281,7 +277,7 @@ export function PptMaker() {
               onClick={() => void generate()}
             >
               <Sparkles size={16} />
-              {busy ? 'Creating…' : 'Generate PowerPoint'}
+              {busy ? 'Creating CEO deck…' : 'Generate CEO PowerPoint'}
             </button>
             {outline && (
               <button
@@ -308,8 +304,8 @@ export function PptMaker() {
             <div className="ppt-empty">
               <Presentation size={40} strokeWidth={1.25} />
               <p>
-                Your slide outline appears here after you generate. Themes:
-                currently <strong>{theme.name}</strong>.
+                Your board narrative appears here. Theme:{' '}
+                <strong>{theme.name}</strong>
               </p>
             </div>
           ) : (
@@ -324,22 +320,31 @@ export function PptMaker() {
                   <li key={`${s.title}-${i}`}>
                     <span className="ppt-slide-num">{i + 1}</span>
                     <div>
-                      <div className="ppt-slide-kind">{s.kind}</div>
+                      <div className="ppt-slide-kind">
+                        {s.kind}
+                        {s.imageUrl ? ' · image' : ''}
+                      </div>
                       <div className="ppt-slide-name">{s.title}</div>
                       {s.bullets && s.bullets.length > 0 && (
                         <ul>
-                          {s.bullets.slice(0, 4).map((b) => (
-                            <li key={b.slice(0, 40)}>{b}</li>
+                          {s.bullets.slice(0, 3).map((b) => (
+                            <li key={b.slice(0, 48)}>{b}</li>
                           ))}
-                          {s.bullets.length > 4 && (
+                          {s.bullets.length > 3 && (
                             <li className="muted">
-                              +{s.bullets.length - 4} more…
+                              +{s.bullets.length - 3} more…
                             </li>
                           )}
                         </ul>
                       )}
-                      {s.quote && (
-                        <p className="ppt-quote">“{s.quote}”</p>
+                      {s.stats && (
+                        <ul>
+                          {s.stats.map((st) => (
+                            <li key={st.label}>
+                              {st.value} — {st.label}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </div>
                   </li>

@@ -60,7 +60,7 @@ export function Home() {
             Live Editor
           </Link>
           <Link to="/ppt-maker" className="btn btn-ghost">
-            AI PPT Maker
+            CEO PPT Maker
           </Link>
         </div>
         <p className="muted" style={{ marginTop: '0.85rem', fontSize: '0.85rem' }}>
