@@ -503,7 +503,10 @@ export function BulkMask() {
                 />
                 <span>
                   <strong>{c.label}</strong>
-                  <small>{c.description}</small>
+                  <small>
+                    {c.description}
+                    {c.maskAs ? ` → ${c.maskAs}` : ''}
+                  </small>
                 </span>
               </label>
             ))}
@@ -564,7 +567,7 @@ export function BulkMask() {
             <label>
               Mask style
               <select
-                value={options.style || 'asterisk'}
+                value={options.style || 'professional'}
                 disabled={running}
                 onChange={(e) =>
                   setOptions((o) => ({
@@ -573,9 +576,10 @@ export function BulkMask() {
                   }))
                 }
               >
-                <option value="asterisk">
-                  Clean asterisks (****) — professional uniform mask
+                <option value="professional">
+                  Professional labels (Customer A, INV-XXXXX, XXXX1234…)
                 </option>
+                <option value="asterisk">Clean asterisks (****)</option>
                 <option value="blur">Soft blur / mosaic</option>
                 <option value="black">Black redaction bars</option>
                 <option value="white">Whiteout only</option>
@@ -640,9 +644,9 @@ export function BulkMask() {
             </label>
           </div>
           <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
-            Default mask uses <strong>asterisks</strong> (e.g. phone 555-1234 →
-            ***-****). Blur uses a soft mosaic. Scanned PDFs use OCR first; the
-            first run may download language data.
+            Default mask style is <strong>Professional</strong> (Customer A,
+            INV-XXXXX, XXXX1234, [Customer Address], remove QR/barcode). Use the
+            Bills / invoices preset for full e-invoice style masking.
           </p>
 
           <h2 className="bulk-section-title">3. Where to save</h2>

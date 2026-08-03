@@ -5,6 +5,7 @@
 import { PDFDocument, rgb, StandardFonts } from '@cantoo/pdf-lib'
 import * as pdfjs from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
+import { formatMaskReplacement } from './maskFormats'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -16,13 +17,24 @@ export type MaskCategory =
   | 'phone'
   | 'address'
   | 'companyName'
+  | 'customerName'
+  | 'customerId'
+  | 'customerAddress'
+  | 'companyAddress'
   | 'amount'
   | 'ssn'
   | 'vat'
   | 'gst'
+  | 'taxId'
   | 'tradeLicense'
   | 'bankAccount'
+  | 'swift'
   | 'invoiceId'
+  | 'poNumber'
+  | 'website'
+  | 'signature'
+  | 'qrCode'
+  | 'barcode'
   | 'lastName'
   | 'custom'
 
@@ -37,27 +49,36 @@ export const MASK_PRESETS: {
     id: 'bills',
     label: 'Bills / invoices',
     description:
-      'Company, customer, address, amounts, tax IDs, licenses, bank & invoice nos.',
+      'Customer A, INV-XXXXX, tax IDs, bank XXXX1234, addresses, QR/barcode remove',
     categories: [
       'email',
       'phone',
-      'lastName',
+      'customerName',
+      'customerId',
+      'customerAddress',
       'companyName',
-      'address',
+      'companyAddress',
       'amount',
-      'ssn',
+      'taxId',
       'vat',
       'gst',
+      'ssn',
       'tradeLicense',
       'bankAccount',
+      'swift',
       'invoiceId',
+      'poNumber',
+      'website',
+      'signature',
+      'qrCode',
+      'barcode',
     ],
   },
   {
     id: 'resume',
     label: 'Resumes / CVs',
     description: 'Person name, phone, email, address, employers',
-    categories: ['email', 'phone', 'lastName', 'companyName', 'address'],
+    categories: ['email', 'phone', 'lastName', 'customerName', 'companyName', 'address'],
   },
 ]
 
@@ -71,11 +92,12 @@ export type MaskOptions = {
   customPatterns?: string
   /**
    * How to hide sensitive data:
-   * - asterisk: replace with **** (keeps rough length; refined look)
-   * - blur: soft pixel mosaic over the region
+   * - professional: field labels (Customer A, INV-XXXXX, XXXX1234, remove QR…)
+   * - asterisk: uniform ****
+   * - blur: soft pixel mosaic
    * - black / white: solid redaction bars
    */
-  style?: 'asterisk' | 'blur' | 'black' | 'white'
+  style?: 'professional' | 'asterisk' | 'blur' | 'black' | 'white'
   /** Padding around matches (normalized fraction of page when OCR; points-ish for text) */
   pad?: number
   /**
@@ -117,84 +139,176 @@ export const MASK_CATEGORY_META: {
   id: MaskCategory
   label: string
   description: string
+  /** What the user sees after mask */
+  maskAs: string
   defaultOn: boolean
 }[] = [
   {
-    id: 'email',
-    label: 'Email addresses',
-    description: 'name@company.com',
+    id: 'customerName',
+    label: 'Customer name',
+    description: 'Bill To / customer company or person',
+    maskAs: 'Customer A',
     defaultOn: false,
   },
   {
-    id: 'phone',
-    label: 'Phone / contact numbers',
-    description: 'Mobile, landline, international',
-    defaultOn: false,
-  },
-  {
-    id: 'lastName',
-    label: 'Person names (auto)',
-    description: 'Resume heading names, Full Name fields, optional name list',
-    defaultOn: false,
-  },
-  {
-    id: 'companyName',
-    label: 'Company / business names',
-    description: 'Auto-detect company names on invoices, letterheads, resumes',
-    defaultOn: false,
-  },
-  {
-    id: 'address',
-    label: 'Addresses',
-    description: 'Street, building, PO Box, labeled Address / Bill To lines',
-    defaultOn: false,
-  },
-  {
-    id: 'amount',
-    label: 'Bill amounts & totals',
-    description: 'Subtotal, tax, grand total, line prices, currency amounts',
+    id: 'customerId',
+    label: 'Customer ID',
+    description: 'CUS-10234 style IDs',
+    maskAs: 'CUS-XXXX',
     defaultOn: false,
   },
   {
     id: 'invoiceId',
-    label: 'Invoice / bill numbers',
-    description: 'Invoice No, Bill No, Receipt No, PO numbers',
+    label: 'Invoice number',
+    description: 'INV-2026-000451',
+    maskAs: 'INV-XXXXX',
     defaultOn: false,
   },
   {
-    id: 'bankAccount',
-    label: 'Bank account / IBAN',
-    description: 'IBAN, account numbers, SWIFT/BIC, routing numbers',
+    id: 'poNumber',
+    label: 'PO number',
+    description: 'PO-89761',
+    maskAs: 'PO-XXXXX',
     defaultOn: false,
   },
   {
-    id: 'ssn',
-    label: 'Security & registration numbers',
-    description: 'SSN, EIN, CIN, CR No, company registration, PAN, etc.',
+    id: 'taxId',
+    label: 'Tax registration (VAT/TRN/GST)',
+    description: 'UAE TRN, VAT, GST numbers',
+    maskAs: 'XXX...XXX',
     defaultOn: false,
   },
   {
     id: 'vat',
-    label: 'VAT / Tax ID numbers',
-    description: 'VAT, TIN, tax registration IDs',
+    label: 'VAT numbers',
+    description: 'VAT / TIN labels',
+    maskAs: 'XXX...XXX',
     defaultOn: false,
   },
   {
     id: 'gst',
     label: 'GST numbers',
-    description: 'GSTIN and labeled GST numbers',
+    description: 'GSTIN',
+    maskAs: 'XXX...XXX',
+    defaultOn: false,
+  },
+  {
+    id: 'bankAccount',
+    label: 'Bank account / IBAN',
+    description: 'IBAN and account numbers',
+    maskAs: 'XXXX1234',
+    defaultOn: false,
+  },
+  {
+    id: 'swift',
+    label: 'SWIFT / BIC code',
+    description: 'ADCBAEAAXXX',
+    maskAs: 'XXXXXXXX',
+    defaultOn: false,
+  },
+  {
+    id: 'companyAddress',
+    label: 'Company address',
+    description: 'Seller / from address',
+    maskAs: '[Address Hidden]',
+    defaultOn: false,
+  },
+  {
+    id: 'customerAddress',
+    label: 'Customer address',
+    description: 'Bill To / ship address',
+    maskAs: '[Customer Address]',
+    defaultOn: false,
+  },
+  {
+    id: 'address',
+    label: 'Other addresses',
+    description: 'Generic street / PO Box lines',
+    maskAs: '[Customer Address]',
+    defaultOn: false,
+  },
+  {
+    id: 'email',
+    label: 'Email',
+    description: 'sales@company.com',
+    maskAs: 'user@example.com',
+    defaultOn: false,
+  },
+  {
+    id: 'phone',
+    label: 'Phone numbers',
+    description: '+971501234567',
+    maskAs: '+971XXXXXXXX',
+    defaultOn: false,
+  },
+  {
+    id: 'website',
+    label: 'Website',
+    description: 'company.com (optional)',
+    maskAs: 'company.com',
+    defaultOn: false,
+  },
+  {
+    id: 'companyName',
+    label: 'Company / seller name',
+    description: 'Letterhead / vendor company',
+    maskAs: '[Company]',
+    defaultOn: false,
+  },
+  {
+    id: 'lastName',
+    label: 'Person names (resume)',
+    description: 'Resume heading / Full Name fields',
+    maskAs: 'Customer A',
+    defaultOn: false,
+  },
+  {
+    id: 'amount',
+    label: 'Bill amounts & totals',
+    description: 'Totals and line prices',
+    maskAs: '***.**',
+    defaultOn: false,
+  },
+  {
+    id: 'ssn',
+    label: 'Security & registration numbers',
+    description: 'SSN, CIN, CR No, PAN, EIN…',
+    maskAs: 'XXX...XXX',
     defaultOn: false,
   },
   {
     id: 'tradeLicense',
     label: 'Trade / commercial licenses',
-    description: 'Trade license, commercial license, shop establishment',
+    description: 'Trade license numbers',
+    maskAs: 'XXX...XXX',
+    defaultOn: false,
+  },
+  {
+    id: 'signature',
+    label: 'Signatures',
+    description: 'Authorized signature areas — removed',
+    maskAs: '(removed)',
+    defaultOn: false,
+  },
+  {
+    id: 'qrCode',
+    label: 'QR codes',
+    description: 'UAE e-invoice QR — removed',
+    maskAs: '(removed)',
+    defaultOn: false,
+  },
+  {
+    id: 'barcode',
+    label: 'Barcodes',
+    description: 'Invoice barcodes — removed',
+    maskAs: '(removed)',
     defaultOn: false,
   },
   {
     id: 'custom',
     label: 'Custom patterns',
     description: 'Your own regular expressions',
+    maskAs: '****',
     defaultOn: false,
   },
 ]
@@ -240,53 +354,72 @@ export function buildMatchers(options: MaskOptions): {
     /(?:tel|phone|mobile|cell|whatsapp|fax)[:\s]*[+()\d\s\-.]{7,20}/gi,
   ])
 
-  // —— Person names (labeled; resume heading handled by auto-detect) ——
+  // —— Customer name (Bill To → Customer A) ——
+  add('customerName', [
+    /(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer\s*Name|Client\s*Name|Customer|Client|Buyer|Consignee|Recipient)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
+    /(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?)\s+[A-Z][a-zA-Z.'\-]{1,30}(?:\s+[A-Z][a-zA-Z.'\-]{1,30}){0,3}/g,
+  ])
+
+  add('customerId', [
+    /\b(?:Customer\s*ID|Client\s*ID|Cust\.?\s*ID|Customer\s*(?:No\.?|Number)|Account\s*ID)[:\s#]*[A-Z0-9\-\/]{3,24}/gi,
+    /\bCUS[\s\-_#]?\d{3,12}\b/gi,
+  ])
+
+  // —— Person names (resume) ——
   add('lastName', [
     /(?:Full\s*Name|Candidate\s*Name|Employee\s*Name|Applicant\s*Name|Contact\s*Name|Person\s*Name|Name\s*of\s*(?:the\s*)?(?:Candidate|Employee|Person)|Name)[:\s#]+[A-Z][a-zA-Z.'\-]{1,30}(?:\s+[A-Z][a-zA-Z.'\-]{1,30}){0,4}/g,
-    /(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?|Prof\.?)\s+[A-Z][a-zA-Z.'\-]{1,30}(?:\s+[A-Z][a-zA-Z.'\-]{1,30}){0,3}/g,
   ])
 
-  // —— Company / business names ——
+  // —— Seller / letterhead company ——
   add('companyName', [
-    // Labeled fields
-    /(?:Company\s*Name|Business\s*Name|Employer|Organisation|Organization|Current\s*Company|Previous\s*Company|Company|Business|Firm|Vendor|Supplier|Customer\s*Name|Client\s*Name|Bill\s*To|Sold\s*To|Ship\s*To|Buyer|Seller|Merchant|Trader|M\/S|M\/s|Messrs\.?|Trading\s*As|T\/A|Worked\s*at|Worked\s*for)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
-    // Legal entity suffixes
-    /\b[A-Z][A-Za-z0-9&.,'"()\-\s]{0,55}?\b(?:LLC|L\.L\.C\.|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|PLC|Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|GmbH|S\.?A\.?R\.?L\.?|S\.?A\.?|B\.?V\.?|N\.?V\.?|Co\.|Company|FZE|FZCO|FZ\-?LLC|WLL|O\.?P\.?C\.?|Sole\s+Proprietorship|SPC|JSC)\b/gi,
-    // Industry-style names
-    /\b[A-Z][A-Za-z0-9&.'\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,20}){0,5}\s+(?:Trading|Enterprises|Industries|Solutions|Services|Technologies|Technology|Holdings|Group|International|Global|Logistics|Construction|Contracting|Consultancy|Consultants|Partners|Associates|Systems|Software|Digital|Media|Foods|Textiles|Motors|Engineering|Healthcare|Pharma|Bank|Insurance)\b/gi,
-    // Employer on resume lines: "at Google" / "— Amazon"
-    /(?:\bat\b|\bwith\b|\bfor\b|@)\s+[A-Z][A-Za-z0-9&.'\-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,30}){0,3}/g,
+    /(?:Company\s*Name|Business\s*Name|Employer|Organisation|Organization|From|Seller|Vendor|Supplier|Merchant|Trader|M\/S|M\/s|Messrs\.?|Trading\s*As|T\/A)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
+    /\b[A-Z][A-Za-z0-9&.,'"()\-\s]{0,55}?\b(?:LLC|L\.L\.C\.|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|PLC|Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|GmbH|FZE|FZCO|FZ\-?LLC|WLL|SPC|JSC)\b/gi,
+    /\b[A-Z][A-Za-z0-9&.'\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,20}){0,5}\s+(?:Trading|Enterprises|Industries|Solutions|Services|Technologies|Holdings|Group|International|Global|Logistics|Construction|Contracting)\b/gi,
   ])
 
-  // Optional explicit company name list
-  if (on.companyName) {
+  if (on.companyName || on.customerName) {
     const companies = parseNameList(options.companyNames || '')
     for (const name of companies) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const flexible = escaped.replace(/\s+/g, '\\s+')
       out.push({
-        category: 'companyName',
+        category: on.customerName ? 'customerName' : 'companyName',
         re: new RegExp(`\\b${flexible}\\b`, 'gi'),
       })
     }
   }
 
-  // —— Addresses (digital + OCR-friendly) ——
+  // —— Addresses ——
+  add('customerAddress', [
+    /(?:Billing\s*Address|Shipping\s*Address|Customer\s*Address|Delivery\s*Address|Ship\s*To\s*Address|Bill\s*To\s*Address)[:\s#]+[^\n]{4,140}/gi,
+  ])
+  add('companyAddress', [
+    /(?:Registered\s*Office|Regd\.?\s*Office|Company\s*Address|Office\s*Address|Head\s*Office|From\s*Address|Seller\s*Address)[:\s#]+[^\n]{4,140}/gi,
+  ])
   add('address', [
-    // Labeled address lines
-    /(?:Address|Registered\s*Office|Regd\.?\s*Office|Billing\s*Address|Shipping\s*Address|Office\s*Address|Postal\s*Address|Mailing\s*Address|Location|Premise|Premises|Head\s*Office|Branch\s*Office)[:\s#]+[^\n]{4,120}/gi,
-    // Street-style
-    /\b\d{1,6}[A-Za-z]?\s+[A-Za-z0-9.'\-\s]{2,50}\b(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Lane|Ln\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Way|Court|Ct\.?|Place|Pl\.?|Terrace|Ter\.?|Highway|Hwy\.?|Circle|Cir\.?|Parkway|Pkwy\.?|Square|Sq\.?)\b[^\n]{0,50}/gi,
-    // Building / flat / villa (common on invoices, GCC, India)
-    /\b(?:Flat|Apartment|Apt\.?|Suite|Ste\.?|Unit|Villa|Building|Bldg\.?|Tower|Floor|Block|Plot|House\s*No\.?|H\.?\s*No\.?|Door\s*No\.?|Shop\s*No\.?)[\s#:.\-]*[A-Za-z0-9\-\/]{1,12}[^\n]{0,60}/gi,
-    // PO Box
-    /\b(?:P\.?\s*O\.?\s*Box|PO\s*Box|Post\s*Box|P\.O\.B\.?)[\s#:]*\d{1,8}\b[^\n]{0,40}/gi,
-    // City, ST ZIP
-    /\b[A-Z][a-zA-Z.\- ]{2,30},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
-    // ZIP / PIN labeled
+    /(?:Address|Postal\s*Address|Mailing\s*Address|Location|Premise|Premises)[:\s#]+[^\n]{4,120}/gi,
+    /\b\d{1,6}[A-Za-z]?\s+[A-Za-z0-9.'\-\s]{2,50}\b(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Lane|Ln\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Way|Court|Ct\.?|Place|Pl\.?)\b[^\n]{0,50}/gi,
+    /\b(?:Flat|Apartment|Apt\.?|Suite|Unit|Villa|Building|Bldg\.?|Tower|Floor|Block|Plot|House\s*No\.?|Shop\s*No\.?)[\s#:.\-]*[A-Za-z0-9\-\/]{1,12}[^\n]{0,60}/gi,
+    /\b(?:P\.?\s*O\.?\s*Box|PO\s*Box|Post\s*Box)[\s#:]*\d{1,8}\b[^\n]{0,40}/gi,
     /\b(?:ZIP|Pin\s*Code|Pincode|Postal\s*Code)[:\s#]*\d{4,10}\b/gi,
-    // UAE / GCC style free zones & areas often on bills
-    /\b(?:Dubai|Abu\s*Dhabi|Sharjah|Ajman|Ras\s*Al\s*Khaimah|Fujairah|Umm\s*Al\s*Quwain|Doha|Riyadh|Jeddah|Muscat|Kuwait|Manama)[^\n]{0,40}/gi,
+  ])
+
+  add('website', [
+    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9][-a-z0-9]{1,40}\.(?:com|net|org|ae|io|co|uk|in|biz|info)(?:\/[^\s]*)?/gi,
+    /\b(?:Website|Web|URL)[:\s#]+[^\s\n]{4,60}/gi,
+  ])
+
+  add('signature', [
+    /\b(?:Authorized\s*Signature|Authorised\s*Signature|Signature|Signed\s*by|For\s+[A-Z][A-Za-z\s&]{2,40}$)/gi,
+    /\b(?:Digitally\s*signed|E\-?Sign(?:ature)?)\b/gi,
+  ])
+
+  add('qrCode', [
+    /\b(?:QR\s*Code|QRCode|Scan\s*(?:QR|code)|e\-?Invoice\s*QR|UAE\s*QR|FTA\s*QR)\b/gi,
+  ])
+
+  add('barcode', [
+    /\b(?:Barcode|Bar\s*Code|Bar\-Code)\b/gi,
   ])
 
   // —— Bill / invoice money amounts ——
@@ -304,23 +437,35 @@ export function buildMatchers(options: MaskOptions): {
 
   // —— Invoice / bill / receipt IDs ——
   add('invoiceId', [
-    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma|Quotation|Quote|Debit\s*Note|Credit\s*Note|Challan|Order|PO|P\.?O\.?|Purchase\s*Order|Sales\s*Order|SO|Ref\.?|Reference|Document|Doc\.?)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)?[:\s#]*[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
-    /\b(?:INV|BILL|RCP|RCPT|TAXINV|PO|SO)[-_\/]?\d{3,20}\b/gi,
-    /\b(?:Invoice|Bill)\s*(?:Date)?[:\s]*\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/gi,
+    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)?[:\s#]*[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
+    /\b(?:INV|BILL|RCP|RCPT|TAXINV)[-_\/]?\d{3,20}\b/gi,
+    /\bINV[\s\-_]\d{4}[\s\-_]\d{3,10}\b/gi,
+  ])
+
+  add('poNumber', [
+    /\b(?:P\.?O\.?|Purchase\s*Order|PO\s*(?:No\.?|Number|#)?)[:\s#]*[A-Z0-9\-\/]{3,24}/gi,
+    /\bPO[\s\-_#]?\d{3,16}\b/gi,
   ])
 
   // —— Bank details on bills ——
   add('bankAccount', [
-    // IBAN
-    /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g,
+    /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g, // IBAN
     /\bIBAN[:\s#]*[A-Z0-9\s]{12,42}/gi,
-    // SWIFT / BIC
-    /\b(?:SWIFT|BIC)[:\s#]*[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi,
-    /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b(?=.*(?:SWIFT|BIC))/gi,
-    // Account numbers
     /\b(?:Account\s*(?:No\.?|Number|#)|A\/C\s*(?:No\.?|Number)?|Acct\.?\s*(?:No\.?|Number)?|Bank\s*Account|Beneficiary\s*Account)[:\s#]*[0-9\-\s]{6,28}/gi,
     /\b(?:Routing\s*(?:No\.?|Number)|Sort\s*Code|IFSC|IFS\s*Code)[:\s#]*[A-Z0-9]{6,15}/gi,
-    /\b[A-Z]{4}0[A-Z0-9]{6}\b/g, // India IFSC
+    /\b[A-Z]{4}0[A-Z0-9]{6}\b/g,
+  ])
+
+  add('swift', [
+    /\b(?:SWIFT|BIC|Swift\s*Code|BIC\s*Code)[:\s#]*[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi,
+    /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g,
+  ])
+
+  // Combined tax registration (UAE TRN = 15 digits, etc.)
+  add('taxId', [
+    /\b(?:TRN|Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*No\.?)[:\s#]*\d{9,15}\b/gi,
+    /\b(?:VAT|V\.A\.T\.|GST|GSTIN|TIN)[:\s#]*[A-Z0-9]{8,18}\b/gi,
+    /\b\d{15}\b/g, // UAE TRN often 15 digits
   ])
 
   // Person + company security / registration numbers
@@ -503,23 +648,34 @@ export async function maskSensitivePdf(
   // Apply refined masks with pdf-lib (overlay; original structure kept)
   const doc = await PDFDocument.load(data, { ignoreEncryption: true })
   const pages = doc.getPages()
-  const style = options.style || 'asterisk'
-  // Courier = even star spacing (clean, professional)
+  const style = options.style || 'professional'
   const mono = await doc.embedFont(StandardFonts.Courier)
+  const labelFont = await doc.embedFont(StandardFonts.Helvetica)
 
   for (const box of merged) {
     const page = pages[box.page]
     if (!page) continue
     const { width: W, height: H } = page.getSize()
-    // Small outer pad so edges don't show original glyphs
+    // Expand QR / barcode / signature removal regions
+    let expand = 0
+    if (box.category === 'qrCode') expand = 0.06
+    if (box.category === 'barcode') expand = 0.04
+    if (box.category === 'signature') expand = 0.03
+    const bx = Math.max(0, box.x - expand)
+    const by = Math.max(0, box.y - expand)
+    const bw = Math.min(1 - bx, box.w + expand * 2)
+    const bh = Math.min(1 - by, box.h + expand * 2 + (box.category === 'qrCode' ? 0.08 : 0))
+
     const padX = 1.2
     const padY = 0.8
-    const x = clamp(box.x * W - padX, 0, W)
-    const h = clamp(box.h * H + padY * 2, 4, H)
-    const w = clamp(box.w * W + padX * 2, 8, W)
-    const y = clamp(H - (box.y + box.h) * H - padY, 0, H)
+    const x = clamp(bx * W - padX, 0, W)
+    const h = clamp(bh * H + padY * 2, 4, H)
+    const w = clamp(bw * W + padX * 2, 8, W)
+    const y = clamp(H - (by + bh) * H - padY, 0, H)
 
-    if (style === 'asterisk') {
+    if (style === 'professional') {
+      applyProfessionalMask(page, labelFont, x, y, w, h, box.category, box.text)
+    } else if (style === 'asterisk') {
       applyCleanAsteriskMask(page, mono, x, y, w, h)
     } else if (style === 'blur') {
       applyBlurMosaic(page, x, y, w, h)
@@ -617,6 +773,78 @@ function boxesOverlapOrNear(a: Box, b: Box): boolean {
   const bx2 = b.x + b.w
   const by2 = b.y + b.h
   return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1
+}
+
+/** Professional bill mask: Customer A, INV-XXXXX, remove QR, etc. */
+function applyProfessionalMask(
+  page: import('@cantoo/pdf-lib').PDFPage,
+  font: import('@cantoo/pdf-lib').PDFFont,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  category: MaskCategory,
+  original: string,
+) {
+  const rep = formatMaskReplacement(category, original)
+
+  // Always wipe original
+  page.drawRectangle({
+    x: x - 0.5,
+    y: y - 0.5,
+    width: w + 1,
+    height: h + 1,
+    color: rgb(1, 1, 1),
+    borderWidth: 0,
+  })
+
+  if (rep.mode === 'remove') {
+    // Soft neutral block (no signature/QR residual)
+    page.drawRectangle({
+      x: x + 0.3,
+      y: y + 0.3,
+      width: Math.max(1, w - 0.6),
+      height: Math.max(1, h - 0.6),
+      color: rgb(0.97, 0.97, 0.98),
+      borderWidth: 0.35,
+      borderColor: rgb(0.9, 0.91, 0.93),
+    })
+    return
+  }
+
+  // Light field
+  page.drawRectangle({
+    x: x + 0.3,
+    y: y + 0.3,
+    width: Math.max(1, w - 0.6),
+    height: Math.max(1, h - 0.6),
+    color: rgb(0.97, 0.98, 0.99),
+    borderWidth: 0.35,
+    borderColor: rgb(0.88, 0.9, 0.93),
+  })
+
+  let text = rep.text
+  let size = Math.max(6, Math.min(h * 0.55, 10))
+  // Fit text into box
+  while (size > 5 && font.widthOfTextAtSize(text, size) > w - 4) {
+    size -= 0.4
+  }
+  if (font.widthOfTextAtSize(text, size) > w - 3) {
+    // Truncate with ellipsis if still too long
+    while (text.length > 4 && font.widthOfTextAtSize(text + '…', size) > w - 3) {
+      text = text.slice(0, -1)
+    }
+    text = text + (text.endsWith('…') ? '' : '…')
+  }
+  const tw = font.widthOfTextAtSize(text, size)
+  const baseline = y + (h - size) / 2 + size * 0.12
+  page.drawText(text, {
+    x: Math.max(x + 2, x + (w - tw) / 2),
+    y: Math.max(y + 1, baseline),
+    size,
+    font,
+    color: rgb(0.28, 0.3, 0.35),
+  })
 }
 
 /**
@@ -1202,19 +1430,34 @@ function collectMatches(
       follow: 2,
     },
     {
-      re: /^(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer|Client|Buyer|Consignee)\s*[:#]?\s*$/i,
-      cat: 'companyName',
+      re: /^(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer|Client|Buyer|Consignee|Customer\s*Name)\s*[:#]?\s*$/i,
+      cat: 'customerName',
       follow: 3,
     },
     {
-      re: /^(?:Address|Billing\s*Address|Shipping\s*Address|Registered\s*Office|Location)\s*[:#]?\s*$/i,
+      re: /^(?:Billing\s*Address|Shipping\s*Address|Customer\s*Address|Delivery\s*Address)\s*[:#]?\s*$/i,
+      cat: 'customerAddress',
+      follow: 3,
+    },
+    {
+      re: /^(?:Registered\s*Office|Company\s*Address|Office\s*Address|Head\s*Office)\s*[:#]?\s*$/i,
+      cat: 'companyAddress',
+      follow: 3,
+    },
+    {
+      re: /^(?:Address|Location)\s*[:#]?\s*$/i,
       cat: 'address',
       follow: 3,
     },
     {
-      re: /^(?:Bank\s*Name|Bank|Account\s*Name|Beneficiary)\s*[:#]?\s*$/i,
+      re: /^(?:Bank\s*Name|Bank|Account\s*Name|Beneficiary|IBAN)\s*[:#]?\s*$/i,
       cat: 'bankAccount',
       follow: 2,
+    },
+    {
+      re: /^(?:SWIFT|BIC)\s*[:#]?\s*$/i,
+      cat: 'swift',
+      follow: 1,
     },
   ]
   for (let i = 0; i < lines.length - 1; i++) {
@@ -1284,7 +1527,7 @@ export function defaultMaskOptions(): MaskOptions {
     lastNames: '',
     companyNames: '',
     customPatterns: '',
-    style: 'asterisk',
+    style: 'professional',
     pad: 2,
     ocrMode: 'auto',
     ocrLang: 'eng',
