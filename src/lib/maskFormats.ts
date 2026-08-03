@@ -40,9 +40,12 @@ export function formatMaskReplacement(
     case 'gst':
     case 'ssn':
     case 'tradeLicense':
-    case 'taxId':
-      // Tax Registration → XXX...XXX
+    case 'taxId': {
+      // TRN NO 100123456700003 → XXX...XXX
+      const digits = raw.replace(/\D/g, '')
+      if (digits.length >= 9) return { mode: 'label', text: 'XXX...XXX' }
       return { mode: 'label', text: 'XXX...XXX' }
+    }
 
     case 'bankAccount': {
       // IBAN / Account No → XXXX1234 (last 4 digits if present)

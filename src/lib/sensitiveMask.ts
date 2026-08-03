@@ -173,8 +173,8 @@ export const MASK_CATEGORY_META: {
   },
   {
     id: 'taxId',
-    label: 'Tax registration (VAT/TRN/GST)',
-    description: 'UAE TRN, VAT, GST numbers',
+    label: 'TRN / Tax registration',
+    description: 'TRN NO, Tax Reg No, VAT/TRN (e.g. 100123456700003)',
     maskAs: 'XXX...XXX',
     defaultOn: false,
   },
@@ -455,10 +455,15 @@ export function buildMatchers(options: MaskOptions): {
     /\b(?:SWIFT|BIC|Swift\s*Code|BIC\s*Code)[:\s#]*[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi,
   ])
 
-  // Tax registration — labeled values only (not every long number)
+  // Tax registration / TRN NO (UAE e-invoice style) — mask these
   add('taxId', [
-    /\b(?:TRN|Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*No\.?)[:\s#]*\d{9,15}\b/gi,
-    /\b(?:VAT|V\.A\.T\.|GST|GSTIN|TIN)[:\s#]*[A-Z0-9]{8,18}\b/gi,
+    // TRN NO / TRN No. / TRN# / TRN:
+    /\bTRN(?:\s*(?:NO|No|Number|#|\.))?[\s.:#\-]*\d{9,15}\b/gi,
+    /\bT\.?R\.?N\.?(?:\s*(?:NO|No|Number|#))?[\s.:#\-]*\d{9,15}\b/gi,
+    /\b(?:Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*(?:No\.?|Number)|Tax\s*Regn\.?)[:\s.#\-]*\d{9,15}\b/gi,
+    /\b(?:VAT|V\.A\.T\.|GST|GSTIN|TIN)(?:\s*(?:NO|No|Number|#))?[:\s.#\-]*[A-Z0-9]{8,18}\b/gi,
+    // Label on one token, number nearby (OCR often splits "TRN NO" and digits)
+    /\bTRN\s*(?:NO|No|Number|#|\.)?\b/gi,
   ])
 
   // Person + company security / registration — prefer labeled
@@ -1553,6 +1558,10 @@ function collectMatches(
       re: /^(?:SWIFT|BIC|Swift\s*Code)\s*[:#]?\s*$/i,
       cat: 'swift',
     },
+    {
+      re: /^(?:TRN|T\.?R\.?N\.?|TRN\s*(?:NO|No|Number|#)|Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*(?:No\.?|Number)?)\s*[:#]?\s*$/i,
+      cat: 'taxId',
+    },
   ]
   for (let i = 0; i < lines.length - 1; i++) {
     const lineText = lines[i].map((t) => t.str).join(' ').trim()
@@ -1567,6 +1576,11 @@ function collectMatches(
         .trim()
       // Value line must be short (one field), not a paragraph of the invoice
       if (text.length < 2 || text.length > 70) continue
+      // TRN values are typically 9–15 digits
+      if (rule.cat === 'taxId' && !/\d{9,15}/.test(text.replace(/\s/g, ''))) {
+        // still mask if it looks like an alphanumeric tax id
+        if (!/^[A-Z0-9\-\s]{8,20}$/i.test(text)) continue
+      }
       const minX = Math.min(...next.map((t) => t.x))
       const maxX = Math.max(...next.map((t) => t.x + t.w))
       const minY = Math.min(...next.map((t) => t.y))
@@ -1574,6 +1588,31 @@ function collectMatches(
       const w = maxX - minX
       if (w > 0.55) continue
       pushBox(rule.cat, text, minX, minY, w, maxY - minY)
+    }
+  }
+
+  // Same-line: "TRN NO 100123456700003" or "TRN: 1001..." — mask the digit token(s)
+  if (matchers.some((m) => m.category === 'taxId')) {
+    for (const line of lines) {
+      const spaced = line.map((i) => i.str).join(' ')
+      if (!/\bTRN\b/i.test(spaced) && !/Tax\s*Reg/i.test(spaced)) continue
+      for (const it of line) {
+        const digits = it.str.replace(/\s/g, '')
+        if (/^\d{9,15}$/.test(digits)) {
+          pushBox('taxId', it.str, it.x, it.y, it.w, it.h)
+        }
+      }
+      // If whole line is "TRN NO 1001..." mask digit portion via full short line
+      const m = spaced.match(
+        /\b(?:TRN|T\.?R\.?N\.?)(?:\s*(?:NO|No|Number|#|\.))?[\s.:#\-]*(\d{9,15})\b/i,
+      )
+      if (m && spaced.length <= 40) {
+        const minX = Math.min(...line.map((i) => i.x))
+        const maxX = Math.max(...line.map((i) => i.x + i.w))
+        const minY = Math.min(...line.map((i) => i.y))
+        const maxY = Math.max(...line.map((i) => i.y + i.h))
+        pushBox('taxId', m[0], minX, minY, maxX - minX, maxY - minY)
+      }
     }
   }
 }
