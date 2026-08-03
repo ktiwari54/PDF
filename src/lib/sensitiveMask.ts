@@ -21,8 +21,45 @@ export type MaskCategory =
   | 'vat'
   | 'gst'
   | 'tradeLicense'
+  | 'bankAccount'
+  | 'invoiceId'
   | 'lastName'
   | 'custom'
+
+/** One-click presets — categories stay off by default until user picks */
+export const MASK_PRESETS: {
+  id: string
+  label: string
+  description: string
+  categories: MaskCategory[]
+}[] = [
+  {
+    id: 'bills',
+    label: 'Bills / invoices',
+    description:
+      'Company, customer, address, amounts, tax IDs, licenses, bank & invoice nos.',
+    categories: [
+      'email',
+      'phone',
+      'lastName',
+      'companyName',
+      'address',
+      'amount',
+      'ssn',
+      'vat',
+      'gst',
+      'tradeLicense',
+      'bankAccount',
+      'invoiceId',
+    ],
+  },
+  {
+    id: 'resume',
+    label: 'Resumes / CVs',
+    description: 'Person name, phone, email, address, employers',
+    categories: ['email', 'phone', 'lastName', 'companyName', 'address'],
+  },
+]
 
 export type MaskOptions = {
   categories: Partial<Record<MaskCategory, boolean>>
@@ -114,8 +151,20 @@ export const MASK_CATEGORY_META: {
   },
   {
     id: 'amount',
-    label: 'Money amounts (bills)',
-    description: 'Currency amounts like $1,200.00 or ₹5,000',
+    label: 'Bill amounts & totals',
+    description: 'Subtotal, tax, grand total, line prices, currency amounts',
+    defaultOn: false,
+  },
+  {
+    id: 'invoiceId',
+    label: 'Invoice / bill numbers',
+    description: 'Invoice No, Bill No, Receipt No, PO numbers',
+    defaultOn: false,
+  },
+  {
+    id: 'bankAccount',
+    label: 'Bank account / IBAN',
+    description: 'IBAN, account numbers, SWIFT/BIC, routing numbers',
     defaultOn: false,
   },
   {
@@ -149,6 +198,22 @@ export const MASK_CATEGORY_META: {
     defaultOn: false,
   },
 ]
+
+export function applyMaskPreset(
+  presetId: string,
+): Partial<Record<MaskCategory, boolean>> {
+  const preset = MASK_PRESETS.find((p) => p.id === presetId)
+  const categories: Partial<Record<MaskCategory, boolean>> = {}
+  for (const c of MASK_CATEGORY_META) {
+    categories[c.id] = false
+  }
+  if (preset) {
+    for (const id of preset.categories) {
+      categories[id] = true
+    }
+  }
+  return categories
+}
 
 /** Build regex list for enabled categories */
 export function buildMatchers(options: MaskOptions): {
@@ -224,10 +289,38 @@ export function buildMatchers(options: MaskOptions): {
     /\b(?:Dubai|Abu\s*Dhabi|Sharjah|Ajman|Ras\s*Al\s*Khaimah|Fujairah|Umm\s*Al\s*Quwain|Doha|Riyadh|Jeddah|Muscat|Kuwait|Manama)[^\n]{0,40}/gi,
   ])
 
+  // —— Bill / invoice money amounts ——
   add('amount', [
-    /(?:USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|\$|€|£|₹|¥)\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\b/gi,
-    /\b\d{1,3}(?:,\d{3})+(?:\.\d{2})\b/g,
-    /\b(?:amount|total|balance|due|paid|invoice\s*value|grand\s*total)[:\s]*[$€£₹]?\s?\d[\d,]*(?:\.\d{2})?/gi,
+    // Currency symbols & codes
+    /(?:USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|BHD|CAD|AUD|\$|€|£|₹|¥|د\.إ)\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,3})?\b/gi,
+    // 1,234.56 or 1.234,56 style totals
+    /\b\d{1,3}(?:[, ]\d{3})+(?:\.\d{2})\b/g,
+    /\b\d{1,3}(?:\.\d{3})+(?:,\d{2})\b/g,
+    // Labeled bill amounts
+    /\b(?:amount|amt\.?|sub\s*total|subtotal|total|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|total\s*payable|paid|payment|invoice\s*value|taxable\s*value|tax\s*amount|vat\s*amount|gst\s*amount|cgst|sgst|igst|discount|freight|shipping\s*charges?|unit\s*price|rate|price|qty\s*total|line\s*total|net\s*amount|gross\s*amount)[:\s]*[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2,3})?/gi,
+    // Standalone money-like decimals often on bills (careful min digits)
+    /(?<![A-Za-z])\d{2,7}[.,]\d{2}(?!\d)/g,
+  ])
+
+  // —— Invoice / bill / receipt IDs ——
+  add('invoiceId', [
+    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma|Quotation|Quote|Debit\s*Note|Credit\s*Note|Challan|Order|PO|P\.?O\.?|Purchase\s*Order|Sales\s*Order|SO|Ref\.?|Reference|Document|Doc\.?)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)?[:\s#]*[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
+    /\b(?:INV|BILL|RCP|RCPT|TAXINV|PO|SO)[-_\/]?\d{3,20}\b/gi,
+    /\b(?:Invoice|Bill)\s*(?:Date)?[:\s]*\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/gi,
+  ])
+
+  // —— Bank details on bills ——
+  add('bankAccount', [
+    // IBAN
+    /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g,
+    /\bIBAN[:\s#]*[A-Z0-9\s]{12,42}/gi,
+    // SWIFT / BIC
+    /\b(?:SWIFT|BIC)[:\s#]*[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi,
+    /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b(?=.*(?:SWIFT|BIC))/gi,
+    // Account numbers
+    /\b(?:Account\s*(?:No\.?|Number|#)|A\/C\s*(?:No\.?|Number)?|Acct\.?\s*(?:No\.?|Number)?|Bank\s*Account|Beneficiary\s*Account)[:\s#]*[0-9\-\s]{6,28}/gi,
+    /\b(?:Routing\s*(?:No\.?|Number)|Sort\s*Code|IFSC|IFS\s*Code)[:\s#]*[A-Z0-9]{6,15}/gi,
+    /\b[A-Z]{4}0[A-Z0-9]{6}\b/g, // India IFSC
   ])
 
   // Person + company security / registration numbers
@@ -1101,27 +1194,47 @@ function collectMatches(
     }
   }
 
-  // If a line is only a label (Address: / Company:), mask the next 1–3 lines as well
-  const labelOnly =
-    /^(?:Company\s*Name|Business\s*Name|Company|Address|Billing\s*Address|Shipping\s*Address|Bill\s*To|Ship\s*To|Sold\s*To|Registered\s*Office|Location)\s*[:#]?\s*$/i
+  // If a line is only a label, mask the following value lines
+  const labelRules: { re: RegExp; cat: MaskCategory; follow: number }[] = [
+    {
+      re: /^(?:Company\s*Name|Business\s*Name|Company|Vendor|Supplier|Seller|From)\s*[:#]?\s*$/i,
+      cat: 'companyName',
+      follow: 2,
+    },
+    {
+      re: /^(?:Bill\s*To|Sold\s*To|Ship\s*To|Customer|Client|Buyer|Consignee)\s*[:#]?\s*$/i,
+      cat: 'companyName',
+      follow: 3,
+    },
+    {
+      re: /^(?:Address|Billing\s*Address|Shipping\s*Address|Registered\s*Office|Location)\s*[:#]?\s*$/i,
+      cat: 'address',
+      follow: 3,
+    },
+    {
+      re: /^(?:Bank\s*Name|Bank|Account\s*Name|Beneficiary)\s*[:#]?\s*$/i,
+      cat: 'bankAccount',
+      follow: 2,
+    },
+  ]
   for (let i = 0; i < lines.length - 1; i++) {
     const lineText = lines[i].map((t) => t.str).join(' ').trim()
-    if (!labelOnly.test(lineText)) continue
-    const isCompany = /company|business|bill\s*to|sold\s*to|ship\s*to/i.test(
-      lineText,
-    )
-    const cat: MaskCategory = isCompany ? 'companyName' : 'address'
-    // Only if that category is enabled
-    if (!matchers.some((m) => m.category === cat)) continue
-    const follow = lines.slice(i + 1, i + 4).flat()
-    if (!follow.length) continue
-    const minX = Math.min(...follow.map((t) => t.x))
-    const maxX = Math.max(...follow.map((t) => t.x + t.w))
-    const minY = Math.min(...follow.map((t) => t.y))
-    const maxY = Math.max(...follow.map((t) => t.y + t.h))
-    const text = follow.map((t) => t.str).join(' ').trim()
-    if (text.length < 3) continue
-    pushBox(cat, text, minX, minY, maxX - minX, maxY - minY)
+    for (const rule of labelRules) {
+      if (!rule.re.test(lineText)) continue
+      if (!matchers.some((m) => m.category === rule.cat)) continue
+      const follow = lines.slice(i + 1, i + 1 + rule.follow).flat()
+      if (!follow.length) continue
+      const minX = Math.min(...follow.map((t) => t.x))
+      const maxX = Math.max(...follow.map((t) => t.x + t.w))
+      const minY = Math.min(...follow.map((t) => t.y))
+      const maxY = Math.max(...follow.map((t) => t.y + t.h))
+      const text = follow
+        .map((t) => t.str)
+        .join(' ')
+        .trim()
+      if (text.length < 2) continue
+      pushBox(rule.cat, text, minX, minY, maxX - minX, maxY - minY)
+    }
   }
 }
 
@@ -1328,7 +1441,7 @@ export function supportsDirectoryPicker(): boolean {
 
 export function buildReportCsv(results: FileJobResult[]): string {
   const lines = [
-    'file,status,hits,error,email,phone,companyName,address,amount,ssn,vat,gst,tradeLicense,lastName,custom',
+    'file,status,hits,error,email,phone,companyName,address,amount,invoiceId,bankAccount,ssn,vat,gst,tradeLicense,lastName,custom',
   ]
   for (const r of results) {
     const c = r.categories || {}
@@ -1343,6 +1456,8 @@ export function buildReportCsv(results: FileJobResult[]): string {
         c.companyName || 0,
         c.address || 0,
         c.amount || 0,
+        c.invoiceId || 0,
+        c.bankAccount || 0,
         c.ssn || 0,
         c.vat || 0,
         c.gst || 0,

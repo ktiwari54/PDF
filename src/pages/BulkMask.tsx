@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import {
   MASK_CATEGORY_META,
+  MASK_PRESETS,
+  applyMaskPreset,
   defaultMaskOptions,
   maskSensitivePdf,
   mapPool,
@@ -437,9 +439,27 @@ export function BulkMask() {
 
           <h2 className="bulk-section-title">2. What to mask</h2>
           <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
-            Everything is off by default — tick only what you want masked.
+            Everything is off by default — use a preset or tick fields yourself.
           </p>
           <div className="bulk-pick-row" style={{ marginBottom: 4 }}>
+            {MASK_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="btn btn-primary"
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                disabled={running}
+                title={p.description}
+                onClick={() =>
+                  setOptions((o) => ({
+                    ...o,
+                    categories: applyMaskPreset(p.id),
+                  }))
+                }
+              >
+                {p.label}
+              </button>
+            ))}
             <button
               type="button"
               className="btn btn-ghost"
@@ -463,13 +483,10 @@ export function BulkMask() {
               style={{ padding: '0.3rem 0.65rem', fontSize: '0.78rem' }}
               disabled={running}
               onClick={() =>
-                setOptions((o) => {
-                  const categories = { ...o.categories }
-                  for (const c of MASK_CATEGORY_META) {
-                    categories[c.id] = false
-                  }
-                  return { ...o, categories }
-                })
+                setOptions((o) => ({
+                  ...o,
+                  categories: applyMaskPreset(''),
+                }))
               }
             >
               Clear all
