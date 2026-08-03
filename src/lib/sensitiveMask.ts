@@ -95,9 +95,15 @@ export const MASK_CATEGORY_META: {
     defaultOn: true,
   },
   {
+    id: 'lastName',
+    label: 'Person names (auto)',
+    description: 'Resume heading names, Full Name fields, optional name list',
+    defaultOn: true,
+  },
+  {
     id: 'companyName',
     label: 'Company / business names',
-    description: 'Labeled company fields, Ltd/LLC/Inc names, or your list',
+    description: 'Auto-detect company names on invoices, letterheads, resumes',
     defaultOn: true,
   },
   {
@@ -114,32 +120,26 @@ export const MASK_CATEGORY_META: {
   },
   {
     id: 'ssn',
-    label: 'Security / national ID numbers',
-    description: 'SSN-style and similar ID numbers',
+    label: 'Security & registration numbers',
+    description: 'SSN, EIN, CIN, CR No, company registration, PAN, etc.',
     defaultOn: true,
   },
   {
     id: 'vat',
-    label: 'VAT numbers',
-    description: 'EU and labeled VAT IDs',
+    label: 'VAT / Tax ID numbers',
+    description: 'VAT, TIN, tax registration IDs',
     defaultOn: true,
   },
   {
     id: 'gst',
     label: 'GST numbers',
-    description: 'India GSTIN and labeled GST',
+    description: 'GSTIN and labeled GST numbers',
     defaultOn: true,
   },
   {
     id: 'tradeLicense',
-    label: 'Trade license numbers',
-    description: 'Trade / commercial license IDs',
-    defaultOn: true,
-  },
-  {
-    id: 'lastName',
-    label: 'Last names',
-    description: 'Names you list below (recommended)',
+    label: 'Trade / commercial licenses',
+    description: 'Trade license, commercial license, shop establishment',
     defaultOn: true,
   },
   {
@@ -175,14 +175,22 @@ export function buildMatchers(options: MaskOptions): {
     /(?:tel|phone|mobile|cell|whatsapp|fax)[:\s]*[+()\d\s\-.]{7,20}/gi,
   ])
 
+  // —— Person names (labeled; resume heading handled by auto-detect) ——
+  add('lastName', [
+    /(?:Full\s*Name|Candidate\s*Name|Employee\s*Name|Applicant\s*Name|Contact\s*Name|Person\s*Name|Name\s*of\s*(?:the\s*)?(?:Candidate|Employee|Person)|Name)[:\s#]+[A-Z][a-zA-Z.'\-]{1,30}(?:\s+[A-Z][a-zA-Z.'\-]{1,30}){0,4}/g,
+    /(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?|Prof\.?)\s+[A-Z][a-zA-Z.'\-]{1,30}(?:\s+[A-Z][a-zA-Z.'\-]{1,30}){0,3}/g,
+  ])
+
   // —— Company / business names ——
   add('companyName', [
-    // Labeled fields (mask whole label+value so OCR spans still hit)
-    /(?:Company\s*Name|Business\s*Name|Organisation|Organization|Company|Business|Firm|Vendor|Supplier|Customer\s*Name|Client\s*Name|Bill\s*To|Sold\s*To|Ship\s*To|Buyer|Seller|Merchant|Trader|M\/S|M\/s|Messrs\.?|Trading\s*As|T\/A)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
-    // Legal entity suffixes (Acme Trading LLC, Foo Pvt. Ltd.)
-    /\b[A-Z][A-Za-z0-9&.,'"()\-\s]{0,55}?\b(?:LLC|L\.L\.C\.|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|PLC|Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|GmbH|S\.?A\.?R\.?L\.?|S\.?A\.?|B\.?V\.?|N\.?V\.?|Co\.|Company|FZE|FZCO|FZ\-?LLC|WLL|O\.?P\.?C\.?|Sole\s+Proprietorship)\b/gi,
-    // “XYZ Trading” / “XYZ Enterprises” style
-    /\b[A-Z][A-Za-z0-9&.'\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,20}){0,4}\s+(?:Trading|Enterprises|Industries|Solutions|Services|Technologies|Technology|Holdings|Group|International|Global|Logistics|Construction|Contracting|Consultancy|Consultants|Partners|Associates)\b/gi,
+    // Labeled fields
+    /(?:Company\s*Name|Business\s*Name|Employer|Organisation|Organization|Current\s*Company|Previous\s*Company|Company|Business|Firm|Vendor|Supplier|Customer\s*Name|Client\s*Name|Bill\s*To|Sold\s*To|Ship\s*To|Buyer|Seller|Merchant|Trader|M\/S|M\/s|Messrs\.?|Trading\s*As|T\/A|Worked\s*at|Worked\s*for)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
+    // Legal entity suffixes
+    /\b[A-Z][A-Za-z0-9&.,'"()\-\s]{0,55}?\b(?:LLC|L\.L\.C\.|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|PLC|Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|GmbH|S\.?A\.?R\.?L\.?|S\.?A\.?|B\.?V\.?|N\.?V\.?|Co\.|Company|FZE|FZCO|FZ\-?LLC|WLL|O\.?P\.?C\.?|Sole\s+Proprietorship|SPC|JSC)\b/gi,
+    // Industry-style names
+    /\b[A-Z][A-Za-z0-9&.'\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,20}){0,5}\s+(?:Trading|Enterprises|Industries|Solutions|Services|Technologies|Technology|Holdings|Group|International|Global|Logistics|Construction|Contracting|Consultancy|Consultants|Partners|Associates|Systems|Software|Digital|Media|Foods|Textiles|Motors|Engineering|Healthcare|Pharma|Bank|Insurance)\b/gi,
+    // Employer on resume lines: "at Google" / "— Amazon"
+    /(?:\bat\b|\bwith\b|\bfor\b|@)\s+[A-Z][A-Za-z0-9&.'\-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,30}){0,3}/g,
   ])
 
   // Optional explicit company name list
@@ -190,7 +198,6 @@ export function buildMatchers(options: MaskOptions): {
     const companies = parseNameList(options.companyNames || '')
     for (const name of companies) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      // Allow flexible whitespace between words
       const flexible = escaped.replace(/\s+/g, '\\s+')
       out.push({
         category: 'companyName',
@@ -223,32 +230,42 @@ export function buildMatchers(options: MaskOptions): {
     /\b(?:amount|total|balance|due|paid|invoice\s*value|grand\s*total)[:\s]*[$€£₹]?\s?\d[\d,]*(?:\.\d{2})?/gi,
   ])
 
+  // Person + company security / registration numbers
   add('ssn', [
     /\b\d{3}-\d{2}-\d{4}\b/g, // US SSN
     /\b\d{3}\s\d{2}\s\d{4}\b/g,
-    /\b(?:SSN|Social Security|National ID|Aadhaar|Aadhar|Emirates ID|IQAMA|Civil ID)[:\s#]*[A-Za-z0-9\-\s]{5,20}/gi,
-    /\b\d{4}\s\d{4}\s\d{4}\b/g, // Aadhaar-like grouped
+    /\b(?:SSN|Social Security|National ID|Aadhaar|Aadhar|Emirates ID|IQAMA|Civil ID|Passport\s*No\.?|National\s*Insurance)[:\s#]*[A-Za-z0-9\-\s]{5,22}/gi,
+    /\b\d{4}\s\d{4}\s\d{4}\b/g, // Aadhaar-like
+    // Company registration / security IDs
+    /\b(?:CIN|Corporate\s*Identity\s*(?:No\.?|Number)|Company\s*(?:Reg(?:istration)?\.?\s*)?(?:No\.?|Number)|CR\s*(?:No\.?|Number)|Commercial\s*Registration|Registration\s*(?:No\.?|Number)|Reg\.?\s*No\.?|EIN|Employer\s*ID|D\-?U\-?N\-?S|DUNS|UEN|BRN|Business\s*Reg(?:istration)?\.?\s*(?:No\.?|Number)|Company\s*Number|Co\.?\s*Reg\.?\s*No\.?|PAN|TAN|DIN|MSME|Udyam|IEC|Import\s*Export\s*Code)[:\s#]*[A-Z0-9\-\/]{5,25}/gi,
+    // India CIN: L12345MH2020PLC123456
+    /\b[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}\b/g,
+    // US EIN 12-3456789
+    /\b\d{2}-\d{7}\b/g,
+    // PAN (India person/company)
+    /\b[A-Z]{5}\d{4}[A-Z]\b/g,
   ])
 
   add('vat', [
-    /\b(?:VAT|V\.A\.T\.|Tax ID|TIN)[:\s#]*[A-Z0-9]{8,15}\b/gi,
-    /\b(?:AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|GB|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK)[A-Z0-9]{8,12}\b/g,
+    /\b(?:VAT|V\.A\.T\.|VAT\s*(?:No\.?|Number|Reg\.?|Registration)|Tax\s*ID|TIN|TRN|Tax\s*Reg(?:istration)?\.?\s*(?:No\.?|Number))[:\s#]*[A-Z0-9]{6,18}\b/gi,
+    /\b(?:AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|GB|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|AE|SA)[A-Z0-9]{8,14}\b/g,
   ])
 
   add('gst', [
     /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b/g, // India GSTIN
-    /\b(?:GSTIN|GST\s*No\.?|GST\s*Number)[:\s#]*[A-Z0-9]{10,20}\b/gi,
+    /\b(?:GSTIN|GSTIN\s*No\.?|GST\s*No\.?|GST\s*Number|GST\s*Reg(?:istration)?\.?\s*(?:No\.?|Number)|Goods\s*and\s*Services\s*Tax)[:\s#]*[A-Z0-9]{10,20}\b/gi,
+    /\bGST[:\s#]+[A-Z0-9]{10,20}\b/gi,
   ])
 
   add('tradeLicense', [
-    /\b(?:Trade\s*License|Commercial\s*License|Business\s*License|TL\s*No\.?|License\s*No\.?)[:\s#]*[A-Z0-9\-\/]{5,25}\b/gi,
-    /\b(?:TL|CL)[-/\s]?\d{5,15}\b/gi,
+    /\b(?:Trade\s*License|Trade\s*Licence|Commercial\s*License|Business\s*License|Shop\s*(?:&|and)?\s*Establishment|S&E|TL\s*No\.?|License\s*No\.?|Licence\s*No\.?|Trade\s*Lic\.?\s*No\.?|Municipal\s*License|Professional\s*License)[:\s#]*[A-Z0-9\-\/]{4,30}\b/gi,
+    /\b(?:TL|CL|DED|DMCC|JAFZA|RAKEZ|SHAMS)[-/\s]?[A-Z0-9]{5,20}\b/gi,
+    /\bTrade\s*License\s*(?:No\.?|Number|#)?\s*[:\-]?\s*[A-Z0-9\-\/]{5,25}/gi,
   ])
 
   if (on.lastName) {
     const names = parseNameList(options.lastNames || '')
     for (const name of names) {
-      // Word-boundary match for each last name
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       out.push({
         category: 'lastName',
@@ -303,6 +320,8 @@ type TextItem = {
   y: number
   w: number
   h: number
+  /** relative font size (normalized height) */
+  fontH?: number
 }
 
 /**
@@ -376,7 +395,7 @@ export async function maskSensitivePdf(
       }
     }
 
-    collectMatches(items, matchers, pageIndex, padN, boxes, hits)
+    collectMatches(items, matchers, pageIndex, padN, boxes, hits, options)
   }
 
   onProgress?.(
@@ -669,9 +688,226 @@ function extractTextItems(
       y: yTop / vh,
       w: w / vw,
       h: h / vh,
+      fontH: h / vh,
     })
   }
   return items
+}
+
+const RESUME_SECTION_WORDS = new Set(
+  [
+    'experience',
+    'education',
+    'skills',
+    'projects',
+    'summary',
+    'objective',
+    'profile',
+    'contact',
+    'references',
+    'certifications',
+    'achievements',
+    'interests',
+    'languages',
+    'work',
+    'history',
+    'employment',
+    'resume',
+    'curriculum',
+    'vitae',
+    'cv',
+    'portfolio',
+    'about',
+    'me',
+    'personal',
+    'details',
+    'declaration',
+    'hobbies',
+    'awards',
+    'publications',
+    'professional',
+    'technical',
+    'soft',
+    'phone',
+    'email',
+    'address',
+    'linkedin',
+    'github',
+  ].map((s) => s.toLowerCase()),
+)
+
+/**
+ * Detect person name as resume heading: large text near top, 2–4 name-like words.
+ */
+function detectResumePersonNames(items: TextItem[]): TextItem[] {
+  if (!items.length) return []
+
+  // Group into lines
+  const lines = groupItemsIntoLines(
+    items.map((it) => ({
+      str: it.str,
+      x: it.x,
+      y: it.y,
+      w: it.w,
+      h: it.h,
+      fontH: it.fontH ?? it.h,
+    })),
+  )
+
+  type LineInfo = {
+    text: string
+    x: number
+    y: number
+    w: number
+    h: number
+    fontH: number
+    items: typeof lines[0]
+  }
+
+  const lineInfos: LineInfo[] = lines.map((line) => {
+    const text = line
+      .map((i) => i.str)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const fontH = Math.max(...line.map((i) => (i as TextItem).fontH ?? i.h))
+    return {
+      text,
+      x: Math.min(...line.map((i) => i.x)),
+      y: Math.min(...line.map((i) => i.y)),
+      w: Math.max(...line.map((i) => i.x + i.w)) - Math.min(...line.map((i) => i.x)),
+      h: Math.max(...line.map((i) => i.h)),
+      fontH,
+      items: line,
+    }
+  })
+
+  if (!lineInfos.length) return []
+
+  const avgFont =
+    lineInfos.reduce((s, l) => s + l.fontH, 0) / lineInfos.length
+  const maxFont = Math.max(...lineInfos.map((l) => l.fontH))
+
+  const found: TextItem[] = []
+
+  for (const line of lineInfos) {
+    // Must be in top ~22% of page (resume header zone)
+    if (line.y > 0.22) continue
+    // Prefer larger-than-average or max-ish font
+    const large =
+      line.fontH >= avgFont * 1.25 || line.fontH >= maxFont * 0.85
+    if (!large && line.y > 0.08) continue
+
+    if (!looksLikePersonName(line.text)) continue
+
+    found.push({
+      str: line.text,
+      x: line.x,
+      y: line.y,
+      w: Math.max(line.w, 0.08),
+      h: Math.max(line.h, line.fontH, 0.015),
+      fontH: line.fontH,
+    })
+  }
+
+  // Keep at most 2 strongest (largest font, highest on page)
+  found.sort((a, b) => (b.fontH ?? 0) - (a.fontH ?? 0) || a.y - b.y)
+  return found.slice(0, 2)
+}
+
+function looksLikePersonName(text: string): boolean {
+  const t = text.trim()
+  if (t.length < 4 || t.length > 60) return false
+  if (/\d/.test(t)) return false
+  if (/@|www\.|http/i.test(t)) return false
+  if (/[,;:|/\\]/.test(t) && t.split(/[,;]/).length > 2) return false
+
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length < 2 || words.length > 5) return false
+
+  // Reject section headers
+  if (words.every((w) => RESUME_SECTION_WORDS.has(w.toLowerCase()))) return false
+  if (RESUME_SECTION_WORDS.has(t.toLowerCase())) return false
+
+  // Each word should look like a name token
+  let nameLike = 0
+  for (const w of words) {
+    const clean = w.replace(/[.'’\-]/g, '')
+    if (clean.length < 2) return false
+    if (RESUME_SECTION_WORDS.has(clean.toLowerCase())) return false
+    // Title case or ALL CAPS name
+    if (/^[A-Z][a-z]+$/.test(clean) || /^[A-Z]{2,}$/.test(clean)) {
+      nameLike++
+    } else if (/^[A-Z][a-z]+[A-Z][a-z]+$/.test(clean)) {
+      // McDonald style
+      nameLike++
+    } else {
+      return false
+    }
+  }
+  return nameLike >= 2
+}
+
+/**
+ * Detect company letterhead: large-ish line in top area with company-like wording
+ * (when not already a person name).
+ */
+function detectLetterheadCompany(items: TextItem[]): TextItem[] {
+  if (!items.length) return []
+  const lines = groupItemsIntoLines(
+    items.map((it) => ({
+      str: it.str,
+      x: it.x,
+      y: it.y,
+      w: it.w,
+      h: it.h,
+      fontH: it.fontH ?? it.h,
+    })),
+  )
+
+  const companyHint =
+    /\b(LLC|Ltd|Limited|Inc|Corp|PLC|Pvt|Trading|Enterprises|Industries|Solutions|Services|Technologies|Holdings|Group|International|FZE|FZCO|Logistics|Construction|Bank|Insurance|Hospital|University|College|School)\b/i
+
+  const avgFont =
+    items.reduce((s, i) => s + (i.fontH ?? i.h), 0) / items.length
+  const out: TextItem[] = []
+
+  for (const line of lines) {
+    const text = line
+      .map((i) => i.str)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const y = Math.min(...line.map((i) => i.y))
+    const fontH = Math.max(...line.map((i) => (i as TextItem).fontH ?? i.h))
+    if (y > 0.28) continue
+    if (fontH < avgFont * 1.1 && y > 0.12) continue
+    if (text.length < 4 || text.length > 80) continue
+    if (looksLikePersonName(text)) continue
+    if (!companyHint.test(text) && !/^[A-Z][A-Za-z0-9&.,'\-\s]{3,50}$/.test(text)) {
+      continue
+    }
+    // ALL CAPS multi-word company header
+    const isAllCapsHeader =
+      text === text.toUpperCase() &&
+      text.split(/\s+/).length >= 2 &&
+      text.split(/\s+/).length <= 8 &&
+      !/\d{5,}/.test(text)
+
+    if (!companyHint.test(text) && !isAllCapsHeader) continue
+
+    out.push({
+      str: text,
+      x: Math.min(...line.map((i) => i.x)),
+      y,
+      w:
+        Math.max(...line.map((i) => i.x + i.w)) -
+        Math.min(...line.map((i) => i.x)),
+      h: Math.max(...line.map((i) => i.h)),
+      fontH,
+    })
+  }
+  return out.slice(0, 3)
 }
 
 /** Rasterize page + OCR words with bounding boxes (normalized 0–1). */
@@ -721,12 +957,14 @@ async function ocrPageItems(
     if (!text || text.length < 1) continue
     if ((word.confidence ?? 0) < 35) continue
     const b = word.bbox
+    const fh = Math.max((b.y1 - b.y0) / ch, 0.006)
     items.push({
       str: text,
       x: b.x0 / cw,
       y: b.y0 / ch,
       w: Math.max((b.x1 - b.x0) / cw, 0.005),
-      h: Math.max((b.y1 - b.y0) / ch, 0.006),
+      h: fh,
+      fontH: fh,
     })
   }
 
@@ -739,12 +977,14 @@ async function ocrPageItems(
     const text = (line.text || '').trim()
     if (!text || text.length < 3) continue
     const b = line.bbox
+    const fh = Math.max((b.y1 - b.y0) / ch, 0.008)
     items.push({
       str: text,
       x: b.x0 / cw,
       y: b.y0 / ch,
       w: Math.max((b.x1 - b.x0) / cw, 0.01),
-      h: Math.max((b.y1 - b.y0) / ch, 0.008),
+      h: fh,
+      fontH: fh,
     })
   }
 
@@ -758,8 +998,10 @@ function collectMatches(
   padN: number,
   boxes: Box[],
   hits: MaskHit[],
+  options?: MaskOptions,
 ) {
   const pad = Math.max(padN, 0.002)
+  const on = options?.categories || {}
 
   const pushBox = (
     category: MaskCategory,
@@ -778,7 +1020,6 @@ function collectMatches(
       category,
       text: text.slice(0, 80),
     }
-    // de-dupe near-identical boxes
     const dup = boxes.some(
       (b) =>
         b.page === pageIndex &&
@@ -789,6 +1030,20 @@ function collectMatches(
     if (dup) return
     boxes.push(box)
     hits.push({ page: pageIndex + 1, category, text: text.slice(0, 80) })
+  }
+
+  // Auto-detect resume / document person name (large heading near top)
+  if (on.lastName !== false && on.lastName) {
+    for (const n of detectResumePersonNames(items)) {
+      pushBox('lastName', n.str, n.x, n.y, n.w, n.h)
+    }
+  }
+
+  // Auto-detect prominent company letterhead (top of page, company-like)
+  if (on.companyName) {
+    for (const n of detectLetterheadCompany(items)) {
+      pushBox('companyName', n.str, n.x, n.y, n.w, n.h)
+    }
   }
 
   // Per-item match

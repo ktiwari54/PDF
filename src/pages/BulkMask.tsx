@@ -475,15 +475,16 @@ export function BulkMask() {
 
           {options.categories?.lastName && (
             <label className="bulk-field">
-              Last names to mask (one per line or comma-separated)
+              Extra person names to always mask (optional — auto-detects resume
+              headings)
               <textarea
-                rows={4}
+                rows={3}
                 value={options.lastNames || ''}
                 disabled={running}
                 onChange={(e) =>
                   setOptions((o) => ({ ...o, lastNames: e.target.value }))
                 }
-                placeholder={'Smith\nPatel\nAl-Mansoori\nGarcía'}
+                placeholder={'John Smith\nPriya Patel\nMohammed Al-Mansoori'}
               />
             </label>
           )}
