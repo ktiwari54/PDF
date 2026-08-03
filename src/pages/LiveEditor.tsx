@@ -92,10 +92,34 @@ export function LiveEditor() {
     fontFamilyCss: string
   } | null>(null)
 
+  /** Selected annotation (images are fully interactive) */
+  const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null)
+
   const drawing = useRef(false)
   const currentStroke = useRef<Point[]>([])
   const dragStart = useRef<Point | null>(null)
   const tempShape = useRef<Annotation | null>(null)
+  /** Where the next picked image will be placed (normalized) */
+  const pendingImageAt = useRef<Point | null>(null)
+  /** Live drag / resize of an image annotation */
+  const imageInteract = useRef<
+    | {
+        mode: 'move' | 'resize'
+        id: string
+        startClientX: number
+        startClientY: number
+        origX: number
+        origY: number
+        origW: number
+        origH: number
+        corner?: 'nw' | 'ne' | 'sw' | 'se'
+        pageW: number
+        pageH: number
+        /** snapshot before drag for undo */
+        before: Annotation[]
+      }
+    | null
+  >(null)
 
   const pageSpans = spansByPage[page] || []
   const pageAnns = useMemo(
@@ -221,6 +245,7 @@ export function LiveEditor() {
       setHistory([])
       setFuture([])
       setActiveSpanId(null)
+      setSelectedAnnId(null)
       setPage(0)
       setSpansByPage({})
 
@@ -374,18 +399,7 @@ export function LiveEditor() {
           ann.h * canvas.height,
         )
       } else if (ann.type === 'image') {
-        const img = new Image()
-        img.src = ann.dataUrl
-        const draw = () =>
-          ctx.drawImage(
-            img,
-            ann.x * canvas.width,
-            ann.y * canvas.height,
-            ann.w * canvas.width,
-            ann.h * canvas.height,
-          )
-        if (img.complete) draw()
-        else img.onload = draw
+        // Images render in the interactive HTML layer (draggable / resizable)
       } else if (ann.type === 'text' && !ann.replacesSpanId) {
         // free-placed text (not span replace) — draw on canvas
         ctx.fillStyle = ann.color
@@ -417,6 +431,33 @@ export function LiveEditor() {
       editInputRef.current.select()
     }
   }, [activeSpanId])
+
+  // Keyboard: Delete selected image, Escape clear selection
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        selectedAnnId &&
+        annotationsRef.current.some(
+          (a) => a.id === selectedAnnId && a.type === 'image',
+        )
+      ) {
+        e.preventDefault()
+        pushHistory(
+          annotationsRef.current.filter((a) => a.id !== selectedAnnId),
+        )
+        setSelectedAnnId(null)
+      }
+      if (e.key === 'Escape') {
+        setSelectedAnnId(null)
+        if (activeSpanId) cancelActiveEdit()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedAnnId, activeSpanId, pushHistory])
 
   function beginEditSpan(span: PdfTextSpan) {
     if (tool === 'erase') {
@@ -520,8 +561,9 @@ export function LiveEditor() {
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
-    // Don't steal events from text layer
+    // Don't steal events from text / image widgets
     if ((e.target as HTMLElement).closest?.('.le-text-span')) return
+    if ((e.target as HTMLElement).closest?.('.le-image-widget')) return
     const canvas = overlayRef.current
     if (!canvas || !pdfBytes) return
     if (activeSpanId) commitActiveEdit()
@@ -529,7 +571,10 @@ export function LiveEditor() {
     canvas.setPointerCapture(e.pointerId)
     const pt = normPoint(e, canvas)
 
-    if (tool === 'select') return
+    if (tool === 'select') {
+      setSelectedAnnId(null)
+      return
+    }
 
     if (tool === 'text') {
       // New text near click — adopt nearest span font
@@ -560,8 +605,18 @@ export function LiveEditor() {
     }
 
     if (tool === 'image') {
-      dragStart.current = pt
-      imgInputRef.current?.click()
+      // Click anywhere → pick image and place at this point
+      pendingImageAt.current = {
+        x: Math.max(0, Math.min(1, pt.x)),
+        y: Math.max(0, Math.min(1, pt.y)),
+      }
+      setSelectedAnnId(null)
+      setStatus('Choose an image to place here…')
+      if (imgInputRef.current) {
+        imgInputRef.current.value = ''
+        imgInputRef.current.click()
+      }
+      return
     }
 
     if (tool === 'erase') {
@@ -581,6 +636,7 @@ export function LiveEditor() {
             pt.y <= a.y + (a.h || 0)
           ) {
             pushHistory(annotationsRef.current.filter((x) => x.id !== a.id))
+            setSelectedAnnId(null)
             return
           }
         }
@@ -713,22 +769,193 @@ export function LiveEditor() {
   }
 
   async function onImagePicked(file: File) {
-    const pt = dragStart.current || { x: 0.1, y: 0.1 }
-    const dataUrl = await readAsDataURL(file)
-    pushHistory([
-      ...annotationsRef.current,
-      {
-        id: uid(),
-        type: 'image',
-        page,
-        x: pt.x,
-        y: pt.y,
-        w: 0.25,
-        h: 0.18,
-        dataUrl,
-      },
-    ])
+    const pt = pendingImageAt.current || dragStart.current || { x: 0.35, y: 0.3 }
+    pendingImageAt.current = null
     dragStart.current = null
+
+    try {
+      setStatus('Placing image…')
+      const dataUrl = await readAsDataURL(file)
+      const natural = await loadImageNaturalSize(dataUrl)
+      const pageW = viewSize.w || 1
+      const pageH = viewSize.h || 1
+
+      // Default width ~28% of page; height preserves image aspect in screen space
+      let w = 0.28
+      let h = w * (natural.h / Math.max(1, natural.w)) * (pageW / pageH)
+      if (h > 0.45) {
+        h = 0.45
+        w = h * (natural.w / Math.max(1, natural.h)) * (pageH / pageW)
+      }
+      w = Math.max(0.06, Math.min(0.9, w))
+      h = Math.max(0.04, Math.min(0.9, h))
+
+      // Center on click when possible
+      let x = pt.x - w / 2
+      let y = pt.y - h / 2
+      x = Math.max(0, Math.min(1 - w, x))
+      y = Math.max(0, Math.min(1 - h, y))
+
+      const id = uid()
+      pushHistory([
+        ...annotationsRef.current,
+        {
+          id,
+          type: 'image',
+          page,
+          x,
+          y,
+          w,
+          h,
+          dataUrl,
+        },
+      ])
+      setSelectedAnnId(id)
+      setTool('select')
+      setStatus(
+        'Image placed — drag to move, use corner handles to resize. Click Image tool + page to add another.',
+      )
+    } catch (err) {
+      console.error(err)
+      setStatus(err instanceof Error ? err.message : 'Could not load image')
+    }
+  }
+
+  function beginImageMove(
+    e: React.PointerEvent,
+    ann: Extract<Annotation, { type: 'image' }>,
+  ) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (tool === 'erase') {
+      pushHistory(annotationsRef.current.filter((x) => x.id !== ann.id))
+      setSelectedAnnId(null)
+      return
+    }
+    if (activeSpanId) commitActiveEdit()
+    setSelectedAnnId(ann.id)
+    if (tool === 'image') setTool('select')
+
+    const pageEl = (e.currentTarget as HTMLElement).closest(
+      '.le-page',
+    ) as HTMLElement | null
+    const rect = pageEl?.getBoundingClientRect()
+    imageInteract.current = {
+      mode: 'move',
+      id: ann.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origX: ann.x,
+      origY: ann.y,
+      origW: ann.w,
+      origH: ann.h,
+      pageW: rect?.width || viewSize.w || 1,
+      pageH: rect?.height || viewSize.h || 1,
+      before: annotationsRef.current,
+    }
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+
+  function beginImageResize(
+    e: React.PointerEvent,
+    ann: Extract<Annotation, { type: 'image' }>,
+    corner: 'nw' | 'ne' | 'sw' | 'se',
+  ) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (activeSpanId) commitActiveEdit()
+    setSelectedAnnId(ann.id)
+    const pageEl = (e.currentTarget as HTMLElement).closest(
+      '.le-page',
+    ) as HTMLElement | null
+    const rect = pageEl?.getBoundingClientRect()
+    imageInteract.current = {
+      mode: 'resize',
+      id: ann.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origX: ann.x,
+      origY: ann.y,
+      origW: ann.w,
+      origH: ann.h,
+      corner,
+      pageW: rect?.width || viewSize.w || 1,
+      pageH: rect?.height || viewSize.h || 1,
+      before: annotationsRef.current,
+    }
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+
+  function onImagePointerMove(e: React.PointerEvent) {
+    const ix = imageInteract.current
+    if (!ix) return
+    const dx = (e.clientX - ix.startClientX) / ix.pageW
+    const dy = (e.clientY - ix.startClientY) / ix.pageH
+
+    setAnnotations((prev) =>
+      prev.map((a) => {
+        if (a.id !== ix.id || a.type !== 'image') return a
+        if (ix.mode === 'move') {
+          let x = ix.origX + dx
+          let y = ix.origY + dy
+          x = Math.max(0, Math.min(1 - a.w, x))
+          y = Math.max(0, Math.min(1 - a.h, y))
+          return { ...a, x, y }
+        }
+        // resize from corner, keep min size, clamp to page
+        let { origX: x, origY: y, origW: w, origH: h } = ix
+        const minW = 0.04
+        const minH = 0.03
+        if (ix.corner === 'se') {
+          w = Math.max(minW, ix.origW + dx)
+          h = Math.max(minH, ix.origH + dy)
+        } else if (ix.corner === 'sw') {
+          w = Math.max(minW, ix.origW - dx)
+          h = Math.max(minH, ix.origH + dy)
+          x = ix.origX + ix.origW - w
+        } else if (ix.corner === 'ne') {
+          w = Math.max(minW, ix.origW + dx)
+          h = Math.max(minH, ix.origH - dy)
+          y = ix.origY + ix.origH - h
+        } else {
+          // nw
+          w = Math.max(minW, ix.origW - dx)
+          h = Math.max(minH, ix.origH - dy)
+          x = ix.origX + ix.origW - w
+          y = ix.origY + ix.origH - h
+        }
+        // clamp into page
+        if (x < 0) {
+          w += x
+          x = 0
+        }
+        if (y < 0) {
+          h += y
+          y = 0
+        }
+        if (x + w > 1) w = 1 - x
+        if (y + h > 1) h = 1 - y
+        w = Math.max(minW, w)
+        h = Math.max(minH, h)
+        return { ...a, x, y, w, h }
+      }),
+    )
+  }
+
+  function onImagePointerUp() {
+    const ix = imageInteract.current
+    if (!ix) return
+    imageInteract.current = null
+    // Commit one undo step: before → current
+    setHistory((h) => [...h.slice(-40), ix.before])
+    setFuture([])
+    setStatus('Image positioned')
+  }
+
+  function deleteSelectedImage() {
+    if (!selectedAnnId) return
+    pushHistory(annotationsRef.current.filter((a) => a.id !== selectedAnnId))
+    setSelectedAnnId(null)
   }
 
   async function save() {
@@ -763,7 +990,7 @@ export function LiveEditor() {
     { id: 'highlight', label: 'Highlight', icon: <Highlighter size={18} /> },
     { id: 'rect', label: 'Box', icon: <Square size={18} /> },
     { id: 'cover', label: 'Whiteout', icon: <Eye size={18} /> },
-    { id: 'image', label: 'Image', icon: <ImagePlus size={18} /> },
+    { id: 'image', label: 'Add image', icon: <ImagePlus size={18} /> },
     { id: 'erase', label: 'Erase edit', icon: <Eraser size={18} /> },
   ]
 
@@ -959,6 +1186,39 @@ export function LiveEditor() {
                 />
               </label>
             )}
+            {(tool === 'image' ||
+              (selectedAnnId &&
+                annotations.some(
+                  (a) => a.id === selectedAnnId && a.type === 'image',
+                ))) && (
+              <div className="le-image-props">
+                <p className="le-side-label">Image</p>
+                {tool === 'image' && (
+                  <p className="muted" style={{ margin: 0, fontSize: '0.78rem' }}>
+                    Click anywhere on the page to place an image. Then drag to
+                    move or resize with corner handles.
+                  </p>
+                )}
+                {selectedAnnId &&
+                  annotations.some(
+                    (a) => a.id === selectedAnnId && a.type === 'image',
+                  ) && (
+                    <>
+                      <p className="muted" style={{ margin: 0, fontSize: '0.78rem' }}>
+                        Drag the image to reposition. Corners resize.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ width: '100%' }}
+                        onClick={deleteSelectedImage}
+                      >
+                        <Trash2 size={14} /> Remove image
+                      </button>
+                    </>
+                  )}
+              </div>
+            )}
             {annotations.length > 0 && (
               <button
                 type="button"
@@ -1054,7 +1314,7 @@ export function LiveEditor() {
                   handwriting, or <b>Add text</b> for labels.
                 </div>
               )}
-              {!meta?.handwrittenLike && (
+              {!meta?.handwrittenLike && tool !== 'image' && (
                 <div className="le-banner le-banner-soft">
                   <b>Edit text:</b> click a word or line. Typing updates live
                   using the detected font (
@@ -1064,6 +1324,12 @@ export function LiveEditor() {
                   ).
                 </div>
               )}
+              {tool === 'image' && (
+                <div className="le-banner">
+                  <b>Add image:</b> click anywhere on the page → pick a file. Then
+                  drag to move or use the blue corner handles to resize.
+                </div>
+              )}
 
               <div className="le-stage">
                 <div
@@ -1071,6 +1337,14 @@ export function LiveEditor() {
                   style={{
                     width: viewSize.w || undefined,
                     height: viewSize.h || undefined,
+                  }}
+                  onPointerMove={onImagePointerMove}
+                  onPointerUp={onImagePointerUp}
+                  onPointerLeave={(e) => {
+                    // only end if we left the page while dragging
+                    if (imageInteract.current && e.buttons === 0) {
+                      onImagePointerUp()
+                    }
                   }}
                 >
                   <canvas ref={pdfCanvasRef} className="le-pdf-layer" />
@@ -1083,17 +1357,73 @@ export function LiveEditor() {
                           ? 'none'
                           : 'auto',
                       cursor:
-                        tool === 'ink'
-                          ? 'crosshair'
-                          : tool === 'erase'
-                            ? 'cell'
-                            : 'default',
+                        tool === 'image'
+                          ? 'copy'
+                          : tool === 'ink' ||
+                              tool === 'highlight' ||
+                              tool === 'rect' ||
+                              tool === 'cover'
+                            ? 'crosshair'
+                            : tool === 'erase'
+                              ? 'cell'
+                              : 'default',
                     }}
                     onPointerDown={onPointerDown}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
                     onPointerLeave={onPointerUp}
                   />
+
+                  {/* Interactive images — click place, drag, resize */}
+                  {viewSize.w > 0 && (
+                    <div className="le-image-layer">
+                      {pageAnns
+                        .filter(
+                          (a): a is Extract<Annotation, { type: 'image' }> =>
+                            a.type === 'image',
+                        )
+                        .map((img) => {
+                          const selected = selectedAnnId === img.id
+                          return (
+                            <div
+                              key={img.id}
+                              className={`le-image-widget ${selected ? 'selected' : ''}`}
+                              style={{
+                                left: `${img.x * 100}%`,
+                                top: `${img.y * 100}%`,
+                                width: `${img.w * 100}%`,
+                                height: `${img.h * 100}%`,
+                                opacity: img.opacity ?? 1,
+                              }}
+                              onPointerDown={(e) => beginImageMove(e, img)}
+                              title="Drag to move · corners resize"
+                            >
+                              <img
+                                src={img.dataUrl}
+                                alt=""
+                                draggable={false}
+                                className="le-image-widget-img"
+                              />
+                              {selected && (
+                                <>
+                                  {(
+                                    ['nw', 'ne', 'sw', 'se'] as const
+                                  ).map((corner) => (
+                                    <span
+                                      key={corner}
+                                      className={`le-image-handle le-image-handle-${corner}`}
+                                      onPointerDown={(e) =>
+                                        beginImageResize(e, img, corner)
+                                      }
+                                    />
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          )
+                        })}
+                    </div>
+                  )}
 
                   {/* Interactive text layer — font-matched live editing */}
                   {(tool === 'select' ||
@@ -1315,5 +1645,20 @@ function readAsDataURL(file: File): Promise<string> {
     r.onload = () => resolve(String(r.result))
     r.onerror = reject
     r.readAsDataURL(file)
+  })
+}
+
+function loadImageNaturalSize(
+  dataUrl: string,
+): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () =>
+      resolve({
+        w: img.naturalWidth || 800,
+        h: img.naturalHeight || 600,
+      })
+    img.onerror = () => reject(new Error('Invalid image file'))
+    img.src = dataUrl
   })
 }
