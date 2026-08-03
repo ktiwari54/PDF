@@ -49,7 +49,7 @@ export const MASK_PRESETS: {
     id: 'bills',
     label: 'Bills / invoices',
     description:
-      'Customer A, INV-XXXXX, tax IDs, bank XXXX1234, addresses, QR/barcode remove',
+      'Mask PII & bank IDs only — keeps dates, qty, tax %, currency, layout for ERP/OCR',
     categories: [
       'email',
       'phone',
@@ -58,7 +58,7 @@ export const MASK_PRESETS: {
       'customerAddress',
       'companyName',
       'companyAddress',
-      'amount',
+      // amounts intentionally OFF — keep totals for accounting AI
       'taxId',
       'vat',
       'gst',
@@ -422,16 +422,17 @@ export function buildMatchers(options: MaskOptions): {
     /\b(?:Barcode|Bar\s*Code)\b/gi,
   ])
 
-  // —— Bill amounts: ONLY with currency symbol or strong labels (not every number) ——
+  // —— Bill amounts (optional — OFF in Bills preset so ERP totals stay readable) ——
   add('amount', [
-    /(?:USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|BHD|\$|€|£|₹)\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/gi,
-    /\b(?:sub\s*total|subtotal|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|invoice\s*value|taxable\s*value|tax\s*amount|vat\s*amount|gst\s*amount|net\s*amount|gross\s*amount)[:\s]*[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2})?/gi,
+    // Only labeled money lines with a clear amount value
+    /\b(?:sub\s*total|subtotal|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|invoice\s*value|taxable\s*value|net\s*amount|gross\s*amount)[:\s]+[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2})?/gi,
   ])
 
   // —— Invoice / bill / receipt IDs ——
   add('invoiceId', [
-    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)?[:\s#]*[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
-    /\b(?:INV|BILL|RCP|RCPT|TAXINV)[-_\/]?\d{3,20}\b/gi,
+    // Number only — never "Invoice Date" / "Due Date"
+    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)[:\s#]+[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
+    /\b(?:INV|BILL|RCP|RCPT|TAXINV)[-_\/]\d{3,20}\b/gi,
     /\bINV[\s\-_]\d{4}[\s\-_]\d{3,10}\b/gi,
   ])
 
@@ -522,6 +523,94 @@ function parseNameList(text: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length >= 2)
     .slice(0, 5000) // hard cap
+}
+
+/**
+ * Fields that must stay readable for accounting / ERP / OCR / invoice parsing.
+ * Invoice Date, Due Date, Qty, Tax %, Currency, descriptions, layout labels.
+ */
+export function isAccountingSafeText(
+  text: string,
+  category?: MaskCategory,
+): boolean {
+  const t = text.trim()
+  if (!t) return true
+
+  // Pure labels for structure (never mask the word alone)
+  if (
+    /^(invoice\s*date|due\s*date|date|qty|quantity|unit|uom|tax\s*%?|vat\s*%|gst\s*%|rate\s*%|currency|description|item|particulars|hsn|sac|total|subtotal|grand\s*total|net|gross|amount|price|unit\s*price)$/i.test(
+      t,
+    )
+  ) {
+    return true
+  }
+
+  // Invoice Date / Due Date lines (keep full date values)
+  if (
+    /(?:invoice\s*date|due\s*date|date\s*of\s*invoice|payment\s*due|dated?)[:\s]/i.test(
+      t,
+    ) &&
+    /\d{1,4}/.test(t)
+  ) {
+    // If this is mainly a date field, keep it (unless category is clearly PII)
+    if (
+      category !== 'email' &&
+      category !== 'phone' &&
+      category !== 'bankAccount' &&
+      category !== 'customerName'
+    ) {
+      if (
+        /\b\d{1,2}[\/\-.\s]\d{1,2}[\/\-.\s]\d{2,4}\b/.test(t) ||
+        /\b\d{4}[\/\-.\s]\d{1,2}[\/\-.\s]\d{1,2}\b/.test(t) ||
+        /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b/i.test(t)
+      ) {
+        return true
+      }
+    }
+  }
+
+  // Standalone calendar dates
+  if (
+    /^\d{1,2}[\/\-.\s]\d{1,2}[\/\-.\s]\d{2,4}$/.test(t) ||
+    /^\d{4}[\/\-.\s]\d{1,2}[\/\-.\s]\d{1,2}$/.test(t)
+  ) {
+    return true
+  }
+
+  // Tax percentage only (5%, 15%, 0.05) — keep for ERP
+  if (/^(?:tax|vat|gst|cgst|sgst|igst)?\s*%?\s*\d{1,2}(?:[.,]\d{1,2})?\s*%?$/i.test(t)) {
+    return true
+  }
+  if (/^\d{1,2}(?:[.,]\d{1,2})?\s*%$/.test(t)) return true
+
+  // Currency code alone
+  if (/^(USD|EUR|GBP|INR|AED|SAR|QAR|OMR|KWD|BHD|CAD|AUD|\$|€|£|₹)$/i.test(t)) {
+    return true
+  }
+
+  // Quantity-like small integers in tables (not phone/account)
+  if (
+    category !== 'phone' &&
+    category !== 'bankAccount' &&
+    category !== 'taxId' &&
+    category !== 'invoiceId' &&
+    /^\d{1,4}(?:[.,]\d{1,3})?$/.test(t) &&
+    t.replace(/\D/g, '').length <= 4
+  ) {
+    // Don't treat as amount/ssn noise; qty columns stay
+    if (category === 'amount' || category === 'ssn' || !category) return true
+  }
+
+  // Common table headers
+  if (
+    /^(item|description|particulars|product|service|sku|hsn|sac|qty|quantity|unit|rate|tax|amount|total|sr\.?|no\.?|#)$/i.test(
+      t,
+    )
+  ) {
+    return true
+  }
+
+  return false
 }
 
 type Box = {
@@ -1324,6 +1413,9 @@ function collectMatches(
     w: number,
     h: number,
   ) => {
+    // Never mask accounting-safe invoice structure fields
+    if (isAccountingSafeText(text, category)) return
+
     // Hard caps: field-sized masks only — never blank the whole invoice
     let bw = Math.min(w + pad * 2, 0.52)
     let bh = Math.min(h + pad * 2, 0.1)

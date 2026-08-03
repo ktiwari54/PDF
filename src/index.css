@@ -1457,6 +1457,23 @@ textarea {
   gap: 0.75rem;
 }
 
+.bulk-keep-note {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 214, 140, 0.35);
+  background: rgba(61, 214, 140, 0.08);
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.bulk-keep-note strong {
+  color: var(--success);
+  font-size: 0.8rem;
+}
+
 .bulk-save-options {
   display: grid;
   gap: 0.45rem;

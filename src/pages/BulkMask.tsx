@@ -441,6 +441,13 @@ export function BulkMask() {
           <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
             Everything is off by default — use a preset or tick fields yourself.
           </p>
+          <div className="bulk-keep-note">
+            <strong>Always kept for accounting / ERP / OCR</strong>
+            <span>
+              Invoice Date · Due Date · Item Description · Quantity · Tax % ·
+              Currency · Totals layout · Table structure
+            </span>
+          </div>
           <div className="bulk-pick-row" style={{ marginBottom: 4 }}>
             {MASK_PRESETS.map((p) => (
               <button
