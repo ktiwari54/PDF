@@ -428,17 +428,25 @@ export function buildMatchers(options: MaskOptions): {
     /\b(?:sub\s*total|subtotal|grand\s*total|net\s*total|gross\s*total|balance\s*due|amount\s*due|total\s*due|amount\s*payable|invoice\s*value|taxable\s*value|net\s*amount|gross\s*amount)[:\s]+[$€£₹]?\s?\d[\d,]*(?:[.,]\d{2})?/gi,
   ])
 
-  // —— Invoice / bill / receipt IDs ——
+  // —— Invoice / bill / receipt IDs (auto-detect many formats) ——
   add('invoiceId', [
-    // Number only — never "Invoice Date" / "Due Date"
-    /\b(?:Invoice|Inv\.?|Bill|Receipt|Tax\s*Invoice|Proforma)[\s#:.\-]*(?:No\.?|Number|#|Num\.?)[:\s#]+[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
-    /\b(?:INV|BILL|RCP|RCPT|TAXINV)[-_\/]\d{3,20}\b/gi,
-    /\bINV[\s\-_]\d{4}[\s\-_]\d{3,10}\b/gi,
+    // Invoice No. / Inv No / Invoice Number / Inv # (not "Invoice Date")
+    /\b(?:Invoice|Inv\.?|Tax\s*Invoice|Proforma\s*Invoice|Commercial\s*Invoice)(?!\s*Date)[\s#:.\-]*(?:No\.?|Number|#|Num\.|N[o°]\.?)?[\s.:#\-]*[A-Z0-9][A-Z0-9\-\/]{2,30}/gi,
+    // Bill No. (not Bill To)
+    /\bBill(?!\s*To)[\s#:.\-]*(?:No\.?|Number|#)?[\s.:#\-]*[A-Z0-9][A-Z0-9\-\/]{2,28}/gi,
+    // Receipt No.
+    /\b(?:Receipt|Tax\s*Invoice)[\s#:.\-]*(?:No\.?|Number|#)?[\s.:#\-]*[A-Z0-9][A-Z0-9\-\/]{2,28}/gi,
+    // Compact codes: INV-2026-000451, INV/2024/123, INV_00123
+    /\b(?:INV|INVOICE|TAXINV|TXINV|BILL|RCP|RCPT|SI|CN|DN)[\s\-_\/#.:]*[A-Z0-9][\s\-_\/A-Z0-9]{2,28}\b/gi,
+    // Inv: 12345 or Invoice: ABC-99
+    /\bInv(?:oice)?[\s.:#]+(?!Date)[A-Z0-9][A-Z0-9\-\/]{2,28}/gi,
+    // Document No. sometimes used as invoice id
+    /\b(?:Document|Doc\.?|Ref\.?|Reference)[\s#:.\-]*(?:No\.?|Number|#)?[\s.:#\-]*[A-Z0-9][A-Z0-9\-\/]{3,28}/gi,
   ])
 
   add('poNumber', [
-    /\b(?:P\.?O\.?|Purchase\s*Order|PO\s*(?:No\.?|Number|#)?)[:\s#]*[A-Z0-9\-\/]{3,24}/gi,
-    /\bPO[\s\-_#]?\d{3,16}\b/gi,
+    /\b(?:P\.?O\.?|Purchase\s*Order|PO)(?!\s*Box)[\s#:.\-]*(?:No\.?|Number|#)?[\s.:#\-]*[A-Z0-9][A-Z0-9\-\/]{2,24}/gi,
+    /\bPO[\s\-_#\/.]?\d{3,16}\b/gi,
   ])
 
   // —— Bank details on bills ——
@@ -1562,6 +1570,14 @@ function collectMatches(
       re: /^(?:TRN|T\.?R\.?N\.?|TRN\s*(?:NO|No|Number|#)|Tax\s*Registration(?:\s*Number)?|Tax\s*Reg\.?\s*(?:No\.?|Number)?)\s*[:#]?\s*$/i,
       cat: 'taxId',
     },
+    {
+      re: /^(?:Invoice\s*(?:No\.?|Number|#|Num\.?)|Inv\.?\s*(?:No\.?|Number|#)|Tax\s*Invoice\s*(?:No\.?|Number)?|Bill\s*(?:No\.?|Number|#)|Receipt\s*(?:No\.?|Number)|Document\s*(?:No\.?|Number)|Ref\.?\s*(?:No\.?|Number)?)\s*[:#]?\s*$/i,
+      cat: 'invoiceId',
+    },
+    {
+      re: /^(?:P\.?O\.?|Purchase\s*Order|PO\s*(?:No\.?|Number|#)?)\s*[:#]?\s*$/i,
+      cat: 'poNumber',
+    },
   ]
   for (let i = 0; i < lines.length - 1; i++) {
     const lineText = lines[i].map((t) => t.str).join(' ').trim()
@@ -1578,8 +1594,20 @@ function collectMatches(
       if (text.length < 2 || text.length > 70) continue
       // TRN values are typically 9–15 digits
       if (rule.cat === 'taxId' && !/\d{9,15}/.test(text.replace(/\s/g, ''))) {
-        // still mask if it looks like an alphanumeric tax id
         if (!/^[A-Z0-9\-\s]{8,20}$/i.test(text)) continue
+      }
+      // Invoice / PO values should look like IDs (have a digit)
+      if (
+        (rule.cat === 'invoiceId' || rule.cat === 'poNumber') &&
+        !/\d/.test(text)
+      ) {
+        continue
+      }
+      if (
+        (rule.cat === 'invoiceId' || rule.cat === 'poNumber') &&
+        /date|due|qty|total|amount/i.test(text)
+      ) {
+        continue
       }
       const minX = Math.min(...next.map((t) => t.x))
       const maxX = Math.max(...next.map((t) => t.x + t.w))
@@ -1602,7 +1630,6 @@ function collectMatches(
           pushBox('taxId', it.str, it.x, it.y, it.w, it.h)
         }
       }
-      // If whole line is "TRN NO 1001..." mask digit portion via full short line
       const m = spaced.match(
         /\b(?:TRN|T\.?R\.?N\.?)(?:\s*(?:NO|No|Number|#|\.))?[\s.:#\-]*(\d{9,15})\b/i,
       )
@@ -1612,6 +1639,97 @@ function collectMatches(
         const minY = Math.min(...line.map((i) => i.y))
         const maxY = Math.max(...line.map((i) => i.y + i.h))
         pushBox('taxId', m[0], minX, minY, maxX - minX, maxY - minY)
+      }
+    }
+  }
+
+  // Auto-detect invoice numbers on same line / split tokens
+  if (matchers.some((m) => m.category === 'invoiceId')) {
+    for (const line of lines) {
+      const spaced = line.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim()
+      // Skip pure date lines
+      if (/invoice\s*date|due\s*date/i.test(spaced) && !/no\.?|number|#/i.test(spaced)) {
+        continue
+      }
+
+      // Pattern: label + id on same line
+      const labeled = spaced.match(
+        /\b(?:Invoice|Inv\.?|Tax\s*Invoice|Bill|Receipt)(?!\s*Date)(?:\s*(?:No\.?|Number|#|Num\.?))?[\s.:#\-]+([A-Z0-9][A-Z0-9\-\/]{2,28})/i,
+      )
+      if (labeled) {
+        // Mask the ID token(s), not the whole descriptive sentence
+        let masked = false
+        for (const it of line) {
+          const s = it.str.trim()
+          if (
+            s === labeled[1] ||
+            s.replace(/\s/g, '') === labeled[1].replace(/\s/g, '') ||
+            new RegExp(`^${labeled[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i').test(s)
+          ) {
+            pushBox('invoiceId', s, it.x, it.y, it.w, it.h)
+            masked = true
+          }
+        }
+        if (!masked && spaced.length <= 48) {
+          const minX = Math.min(...line.map((i) => i.x))
+          const maxX = Math.max(...line.map((i) => i.x + i.w))
+          const minY = Math.min(...line.map((i) => i.y))
+          const maxY = Math.max(...line.map((i) => i.y + i.h))
+          pushBox(
+            'invoiceId',
+            labeled[0],
+            minX,
+            minY,
+            Math.min(0.5, maxX - minX),
+            maxY - minY,
+          )
+        }
+      }
+
+      // Compact codes anywhere on line: INV-2026-000451, INV/00123
+      for (const it of line) {
+        const s = it.str.trim()
+        if (
+          /^(?:INV|INVOICE|TAXINV|BILL|RCP|SI)[\s\-_\/#.:]*[A-Z0-9][\s\-_\/A-Z0-9]{2,24}$/i.test(
+            s,
+          ) &&
+          /\d/.test(s) &&
+          !/date/i.test(s)
+        ) {
+          pushBox('invoiceId', s, it.x, it.y, it.w, it.h)
+        }
+      }
+
+      // After "Invoice No" tokens, next alphanumeric token is the number
+      for (let ti = 0; ti < line.length - 1; ti++) {
+        const a = line[ti].str.trim()
+        const b = line[ti + 1].str.trim()
+        const labelish =
+          /^(?:Invoice|Inv\.?|Inv|Bill|Receipt)$/i.test(a) ||
+          /^(?:No\.?|Number|#|Num\.?|N[o°]\.?)$/i.test(a) ||
+          /^(?:Invoice|Inv\.?)[\s\-]*(?:No\.?|Number|#)?$/i.test(a)
+        const prev = ti > 0 ? line[ti - 1].str.trim() : ''
+        const pairLabel =
+          (/^(?:Invoice|Inv\.?|Bill|Receipt)$/i.test(prev) &&
+            /^(?:No\.?|Number|#)$/i.test(a)) ||
+          labelish
+        if (!pairLabel) continue
+        if (/date|due|qty|total/i.test(b)) continue
+        if (!/[A-Z0-9]/i.test(b) || !/\d/.test(b)) continue
+        if (b.length < 3 || b.length > 32) continue
+        // If current is Invoice and next is No, take token after No
+        if (/^(?:Invoice|Inv\.?|Bill|Receipt)$/i.test(a) && /^(?:No\.?|Number|#)$/i.test(b)) {
+          if (ti + 2 < line.length) {
+            const c = line[ti + 2].str.trim()
+            if (/\d/.test(c) && c.length >= 3 && c.length <= 32 && !/date/i.test(c)) {
+              pushBox('invoiceId', c, line[ti + 2].x, line[ti + 2].y, line[ti + 2].w, line[ti + 2].h)
+            }
+          }
+          continue
+        }
+        if (/^(?:No\.?|Number|#|Num\.?)$/i.test(a) || /Invoice|Inv|Bill|Receipt/i.test(a)) {
+          pushBox('invoiceId', b, line[ti + 1].x, line[ti + 1].y, line[ti + 1].w, line[ti + 1].h)
+        }
       }
     }
   }
