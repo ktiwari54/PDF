@@ -456,6 +456,23 @@ export function BulkMask() {
             ))}
           </div>
 
+          {options.categories?.companyName && (
+            <label className="bulk-field">
+              Extra company names to always mask (optional — one per line)
+              <textarea
+                rows={3}
+                value={options.companyNames || ''}
+                disabled={running}
+                onChange={(e) =>
+                  setOptions((o) => ({ ...o, companyNames: e.target.value }))
+                }
+                placeholder={
+                  'Acme Trading LLC\nGulf Star Enterprises\nSunrise Pvt Ltd'
+                }
+              />
+            </label>
+          )}
+
           {options.categories?.lastName && (
             <label className="bulk-field">
               Last names to mask (one per line or comma-separated)

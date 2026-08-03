@@ -15,6 +15,7 @@ export type MaskCategory =
   | 'email'
   | 'phone'
   | 'address'
+  | 'companyName'
   | 'amount'
   | 'ssn'
   | 'vat'
@@ -27,6 +28,8 @@ export type MaskOptions = {
   categories: Partial<Record<MaskCategory, boolean>>
   /** Last names to mask (case-insensitive), one per line or comma-separated */
   lastNames?: string
+  /** Company / business names to force-mask (one per line or comma-separated) */
+  companyNames?: string
   /** Extra custom regex patterns (one per line, without /flags/) */
   customPatterns?: string
   /**
@@ -92,9 +95,15 @@ export const MASK_CATEGORY_META: {
     defaultOn: true,
   },
   {
+    id: 'companyName',
+    label: 'Company / business names',
+    description: 'Labeled company fields, Ltd/LLC/Inc names, or your list',
+    defaultOn: true,
+  },
+  {
     id: 'address',
-    label: 'Street addresses',
-    description: 'Street / road / avenue style lines',
+    label: 'Addresses',
+    description: 'Street, building, PO Box, labeled Address / Bill To lines',
     defaultOn: true,
   },
   {
@@ -166,10 +175,46 @@ export function buildMatchers(options: MaskOptions): {
     /(?:tel|phone|mobile|cell|whatsapp|fax)[:\s]*[+()\d\s\-.]{7,20}/gi,
   ])
 
+  // —— Company / business names ——
+  add('companyName', [
+    // Labeled fields (mask whole label+value so OCR spans still hit)
+    /(?:Company\s*Name|Business\s*Name|Organisation|Organization|Company|Business|Firm|Vendor|Supplier|Customer\s*Name|Client\s*Name|Bill\s*To|Sold\s*To|Ship\s*To|Buyer|Seller|Merchant|Trader|M\/S|M\/s|Messrs\.?|Trading\s*As|T\/A)[:\s#]+[A-Za-z0-9&.,'"()\-\s]{2,90}/gi,
+    // Legal entity suffixes (Acme Trading LLC, Foo Pvt. Ltd.)
+    /\b[A-Z][A-Za-z0-9&.,'"()\-\s]{0,55}?\b(?:LLC|L\.L\.C\.|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|PLC|Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|GmbH|S\.?A\.?R\.?L\.?|S\.?A\.?|B\.?V\.?|N\.?V\.?|Co\.|Company|FZE|FZCO|FZ\-?LLC|WLL|O\.?P\.?C\.?|Sole\s+Proprietorship)\b/gi,
+    // “XYZ Trading” / “XYZ Enterprises” style
+    /\b[A-Z][A-Za-z0-9&.'\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.'\-]{1,20}){0,4}\s+(?:Trading|Enterprises|Industries|Solutions|Services|Technologies|Technology|Holdings|Group|International|Global|Logistics|Construction|Contracting|Consultancy|Consultants|Partners|Associates)\b/gi,
+  ])
+
+  // Optional explicit company name list
+  if (on.companyName) {
+    const companies = parseNameList(options.companyNames || '')
+    for (const name of companies) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      // Allow flexible whitespace between words
+      const flexible = escaped.replace(/\s+/g, '\\s+')
+      out.push({
+        category: 'companyName',
+        re: new RegExp(`\\b${flexible}\\b`, 'gi'),
+      })
+    }
+  }
+
+  // —— Addresses (digital + OCR-friendly) ——
   add('address', [
-    /\b\d{1,5}\s+[A-Za-z0-9.'\-\s]{2,40}\b(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Lane|Ln\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Way|Court|Ct\.?|Place|Pl\.?|Terrace|Ter\.?|Highway|Hwy\.?|Suite|Ste\.?|Apartment|Apt\.?)\b[^\n,]{0,40}/gi,
-    /\b(?:P\.?\s*O\.?\s*Box|PO Box)\s+\d+\b/gi,
-    /\b\d{5}(?:-\d{4})?\b(?=.*(?:USA|United States|ZIP))?/g, // zip-ish — kept mild
+    // Labeled address lines
+    /(?:Address|Registered\s*Office|Regd\.?\s*Office|Billing\s*Address|Shipping\s*Address|Office\s*Address|Postal\s*Address|Mailing\s*Address|Location|Premise|Premises|Head\s*Office|Branch\s*Office)[:\s#]+[^\n]{4,120}/gi,
+    // Street-style
+    /\b\d{1,6}[A-Za-z]?\s+[A-Za-z0-9.'\-\s]{2,50}\b(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Lane|Ln\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Way|Court|Ct\.?|Place|Pl\.?|Terrace|Ter\.?|Highway|Hwy\.?|Circle|Cir\.?|Parkway|Pkwy\.?|Square|Sq\.?)\b[^\n]{0,50}/gi,
+    // Building / flat / villa (common on invoices, GCC, India)
+    /\b(?:Flat|Apartment|Apt\.?|Suite|Ste\.?|Unit|Villa|Building|Bldg\.?|Tower|Floor|Block|Plot|House\s*No\.?|H\.?\s*No\.?|Door\s*No\.?|Shop\s*No\.?)[\s#:.\-]*[A-Za-z0-9\-\/]{1,12}[^\n]{0,60}/gi,
+    // PO Box
+    /\b(?:P\.?\s*O\.?\s*Box|PO\s*Box|Post\s*Box|P\.O\.B\.?)[\s#:]*\d{1,8}\b[^\n]{0,40}/gi,
+    // City, ST ZIP
+    /\b[A-Z][a-zA-Z.\- ]{2,30},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
+    // ZIP / PIN labeled
+    /\b(?:ZIP|Pin\s*Code|Pincode|Postal\s*Code)[:\s#]*\d{4,10}\b/gi,
+    // UAE / GCC style free zones & areas often on bills
+    /\b(?:Dubai|Abu\s*Dhabi|Sharjah|Ajman|Ras\s*Al\s*Khaimah|Fujairah|Umm\s*Al\s*Quwain|Doha|Riyadh|Jeddah|Muscat|Kuwait|Manama)[^\n]{0,40}/gi,
   ])
 
   add('amount', [
@@ -683,21 +728,60 @@ function collectMatches(
       h: it.h,
     })),
   )
-  for (const line of lines) {
-    const joined = line.map((i) => i.str).join('')
-    const spaced = line.map((i) => i.str).join(' ')
+
+  const matchOnSpan = (
+    span: { str: string; x: number; y: number; w: number; h: number }[],
+  ) => {
+    const joined = span.map((i) => i.str).join('')
+    const spaced = span.map((i) => i.str).join(' ')
     for (const text of [joined, spaced]) {
       for (const { category, re } of matchers) {
         re.lastIndex = 0
         const match = re.exec(text)
         if (!match) continue
-        const minX = Math.min(...line.map((i) => i.x))
-        const maxX = Math.max(...line.map((i) => i.x + i.w))
-        const minY = Math.min(...line.map((i) => i.y))
-        const maxY = Math.max(...line.map((i) => i.y + i.h))
+        // Prefer covering the matched segment when possible — cover full span bbox
+        const minX = Math.min(...span.map((i) => i.x))
+        const maxX = Math.max(...span.map((i) => i.x + i.w))
+        const minY = Math.min(...span.map((i) => i.y))
+        const maxY = Math.max(...span.map((i) => i.y + i.h))
         pushBox(category, match[0], minX, minY, maxX - minX, maxY - minY)
       }
     }
+  }
+
+  for (const line of lines) {
+    matchOnSpan(line)
+  }
+
+  // Multi-line blocks (company + address often wrap 2–4 lines on invoices)
+  for (let i = 0; i < lines.length; i++) {
+    for (let len = 2; len <= 4 && i + len <= lines.length; len++) {
+      const block = lines.slice(i, i + len).flat()
+      matchOnSpan(block)
+    }
+  }
+
+  // If a line is only a label (Address: / Company:), mask the next 1–3 lines as well
+  const labelOnly =
+    /^(?:Company\s*Name|Business\s*Name|Company|Address|Billing\s*Address|Shipping\s*Address|Bill\s*To|Ship\s*To|Sold\s*To|Registered\s*Office|Location)\s*[:#]?\s*$/i
+  for (let i = 0; i < lines.length - 1; i++) {
+    const lineText = lines[i].map((t) => t.str).join(' ').trim()
+    if (!labelOnly.test(lineText)) continue
+    const isCompany = /company|business|bill\s*to|sold\s*to|ship\s*to/i.test(
+      lineText,
+    )
+    const cat: MaskCategory = isCompany ? 'companyName' : 'address'
+    // Only if that category is enabled
+    if (!matchers.some((m) => m.category === cat)) continue
+    const follow = lines.slice(i + 1, i + 4).flat()
+    if (!follow.length) continue
+    const minX = Math.min(...follow.map((t) => t.x))
+    const maxX = Math.max(...follow.map((t) => t.x + t.w))
+    const minY = Math.min(...follow.map((t) => t.y))
+    const maxY = Math.max(...follow.map((t) => t.y + t.h))
+    const text = follow.map((t) => t.str).join(' ').trim()
+    if (text.length < 3) continue
+    pushBox(cat, text, minX, minY, maxX - minX, maxY - minY)
   }
 }
 
@@ -744,9 +828,10 @@ export function defaultMaskOptions(): MaskOptions {
   return {
     categories,
     lastNames: '',
+    companyNames: '',
     customPatterns: '',
     style: 'asterisk',
-    pad: 1.5,
+    pad: 2,
     ocrMode: 'auto',
     ocrLang: 'eng',
     ocrMaxWidth: 1400,
@@ -902,7 +987,7 @@ export function supportsDirectoryPicker(): boolean {
 
 export function buildReportCsv(results: FileJobResult[]): string {
   const lines = [
-    'file,status,hits,error,email,phone,address,amount,ssn,vat,gst,tradeLicense,lastName,custom',
+    'file,status,hits,error,email,phone,companyName,address,amount,ssn,vat,gst,tradeLicense,lastName,custom',
   ]
   for (const r of results) {
     const c = r.categories || {}
@@ -914,6 +999,7 @@ export function buildReportCsv(results: FileJobResult[]): string {
         csvEscape(r.error || ''),
         c.email || 0,
         c.phone || 0,
+        c.companyName || 0,
         c.address || 0,
         c.amount || 0,
         c.ssn || 0,
