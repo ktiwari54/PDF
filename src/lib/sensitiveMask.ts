@@ -153,22 +153,22 @@ export const MASK_CATEGORY_META: {
   {
     id: 'customerId',
     label: 'Customer ID',
-    description: 'CUS-10234 style IDs',
-    maskAs: 'CUS-XXXX',
+    description: 'CUS-10234',
+    maskAs: 'CUS-XXXX0234 (last 4 digits)',
     defaultOn: false,
   },
   {
     id: 'invoiceId',
     label: 'Invoice number',
     description: 'INV-2026-000451',
-    maskAs: 'INV-XXXXX',
+    maskAs: 'INV-XXXX0451 (last 4 digits)',
     defaultOn: false,
   },
   {
     id: 'poNumber',
     label: 'PO number',
     description: 'PO-89761',
-    maskAs: 'PO-XXXXX',
+    maskAs: 'PO-XXXX9761 (last 4 digits)',
     defaultOn: false,
   },
   {

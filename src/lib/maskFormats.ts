@@ -21,20 +21,20 @@ export function formatMaskReplacement(
       return { mode: 'label', text: 'Customer A' }
 
     case 'customerId':
-      return { mode: 'label', text: prefixMask(raw, 'CUS', 4) }
+      return { mode: 'label', text: prefixWithLast4(raw, 'CUS') }
 
     case 'invoiceId': {
-      // INV-2026-000451 → INV-XXXXX ; also Bill No, etc.
+      // INV-2026-000451 → INV-XXXX0451 (keep last 4 digits)
       if (/^PO[\s\-_]/i.test(raw) || /\bPO[\s\-_#]/i.test(raw)) {
-        return { mode: 'label', text: prefixMask(raw, 'PO', 5) }
+        return { mode: 'label', text: prefixWithLast4(raw, 'PO') }
       }
-      if (/bill/i.test(raw)) return { mode: 'label', text: prefixMask(raw, 'BILL', 5) }
-      if (/rcp|receipt/i.test(raw)) return { mode: 'label', text: prefixMask(raw, 'RCP', 5) }
-      return { mode: 'label', text: prefixMask(raw, 'INV', 5) }
+      if (/bill/i.test(raw)) return { mode: 'label', text: prefixWithLast4(raw, 'BILL') }
+      if (/rcp|receipt/i.test(raw)) return { mode: 'label', text: prefixWithLast4(raw, 'RCP') }
+      return { mode: 'label', text: prefixWithLast4(raw, 'INV') }
     }
 
     case 'poNumber':
-      return { mode: 'label', text: prefixMask(raw, 'PO', 5) }
+      return { mode: 'label', text: prefixWithLast4(raw, 'PO') }
 
     case 'vat':
     case 'gst':
@@ -98,12 +98,27 @@ export function formatMaskReplacement(
   }
 }
 
-/** INV-2026-000451 → INV-XXXXX ; CUS-10234 → CUS-XXXX */
+/** INV-2026-000451 → INV-XXXX0451 ; CUS-10234 → CUS-XXXX0234 (last 4 digits kept) */
+function prefixWithLast4(raw: string, fallbackPrefix: string): string {
+  const m = raw.match(/^([A-Za-z]{1,8})[\s\-_#]*/i)
+  const prefix = (m?.[1] || fallbackPrefix).toUpperCase()
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length >= 4) {
+    return `${prefix}-XXXX${digits.slice(-4)}`
+  }
+  if (digits.length > 0) {
+    return `${prefix}-${'X'.repeat(Math.max(0, 4 - digits.length))}${digits}`
+  }
+  return `${prefix}-XXXX`
+}
+
+/** @deprecated use prefixWithLast4 */
 function prefixMask(raw: string, fallbackPrefix: string, xCount: number): string {
   const m = raw.match(/^([A-Za-z]{1,8})[\s\-_#]*/i)
   const prefix = (m?.[1] || fallbackPrefix).toUpperCase()
   return `${prefix}-${'X'.repeat(xCount)}`
 }
+void prefixMask
 
 /** +971501234567 → +971XXXXXXXX */
 function maskPhone(raw: string): string {
