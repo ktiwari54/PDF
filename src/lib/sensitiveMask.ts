@@ -385,24 +385,30 @@ export async function maskSensitivePdf(
       : `Applying ${boxes.length} redaction(s)…`,
   )
 
+  // Merge overlapping boxes so we don't stack messy asterisks
+  const merged = mergeBoxes(boxes)
+
   // Apply refined masks with pdf-lib (overlay; original structure kept)
   const doc = await PDFDocument.load(data, { ignoreEncryption: true })
   const pages = doc.getPages()
   const style = options.style || 'asterisk'
-  const font = await doc.embedFont(StandardFonts.Helvetica)
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold)
+  // Courier = even star spacing (clean, professional)
+  const mono = await doc.embedFont(StandardFonts.Courier)
 
-  for (const box of boxes) {
+  for (const box of merged) {
     const page = pages[box.page]
     if (!page) continue
     const { width: W, height: H } = page.getSize()
-    const x = clamp(box.x * W, 0, W)
-    const h = clamp(box.h * H, 1, H)
-    const w = clamp(box.w * W, 1, W)
-    const y = clamp(H - (box.y + box.h) * H, 0, H)
+    // Small outer pad so edges don't show original glyphs
+    const padX = 1.2
+    const padY = 0.8
+    const x = clamp(box.x * W - padX, 0, W)
+    const h = clamp(box.h * H + padY * 2, 4, H)
+    const w = clamp(box.w * W + padX * 2, 8, W)
+    const y = clamp(H - (box.y + box.h) * H - padY, 0, H)
 
     if (style === 'asterisk') {
-      applyAsteriskMask(page, font, fontBold, x, y, w, h, box.text)
+      applyCleanAsteriskMask(page, mono, x, y, w, h)
     } else if (style === 'blur') {
       applyBlurMosaic(page, x, y, w, h)
     } else {
@@ -426,76 +432,155 @@ export async function maskSensitivePdf(
   }
 }
 
-/** Cover original glyphs, then draw asterisks (numbers/letters → ****) */
-function applyAsteriskMask(
+/** Merge overlapping / nearly-adjacent boxes on the same page into clean regions */
+function mergeBoxes(boxes: Box[]): Box[] {
+  if (!boxes.length) return []
+  const byPage = new Map<number, Box[]>()
+  for (const b of boxes) {
+    const list = byPage.get(b.page) || []
+    list.push({ ...b })
+    byPage.set(b.page, list)
+  }
+  const out: Box[] = []
+  for (const [, list] of byPage) {
+    // Sort reading order
+    list.sort((a, b) => a.y - b.y || a.x - b.x)
+    const merged: Box[] = []
+    for (const b of list) {
+      let hit = false
+      for (const m of merged) {
+        if (boxesOverlapOrNear(m, b)) {
+          const x2 = Math.max(m.x + m.w, b.x + b.w)
+          const y2 = Math.max(m.y + m.h, b.y + b.h)
+          m.x = Math.min(m.x, b.x)
+          m.y = Math.min(m.y, b.y)
+          m.w = x2 - m.x
+          m.h = y2 - m.y
+          m.text = (m.text + ' ' + b.text).slice(0, 80)
+          hit = true
+          break
+        }
+      }
+      if (!hit) merged.push({ ...b })
+    }
+    // Second pass to collapse chains
+    let changed = true
+    while (changed) {
+      changed = false
+      for (let i = 0; i < merged.length; i++) {
+        for (let j = i + 1; j < merged.length; j++) {
+          if (boxesOverlapOrNear(merged[i], merged[j])) {
+            const a = merged[i]
+            const b = merged[j]
+            const x2 = Math.max(a.x + a.w, b.x + b.w)
+            const y2 = Math.max(a.y + a.h, b.y + b.h)
+            a.x = Math.min(a.x, b.x)
+            a.y = Math.min(a.y, b.y)
+            a.w = x2 - a.x
+            a.h = y2 - a.y
+            merged.splice(j, 1)
+            changed = true
+            break
+          }
+        }
+        if (changed) break
+      }
+    }
+    out.push(...merged)
+  }
+  return out
+}
+
+function boxesOverlapOrNear(a: Box, b: Box): boolean {
+  if (a.page !== b.page) return false
+  // Expand slightly so neighbors on the same line merge
+  const padX = 0.012
+  const padY = 0.008
+  const ax1 = a.x - padX
+  const ay1 = a.y - padY
+  const ax2 = a.x + a.w + padX
+  const ay2 = a.y + a.h + padY
+  const bx1 = b.x
+  const by1 = b.y
+  const bx2 = b.x + b.w
+  const by2 = b.y + b.h
+  return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1
+}
+
+/**
+ * Clean professional asterisk mask:
+ * - Solid white cover (hides original text completely)
+ * - Optional soft light-gray field background
+ * - Uniform monospaced ****** fitted to box (no random patterns)
+ */
+function applyCleanAsteriskMask(
   page: import('@cantoo/pdf-lib').PDFPage,
-  font: import('@cantoo/pdf-lib').PDFFont,
-  fontBold: import('@cantoo/pdf-lib').PDFFont,
+  mono: import('@cantoo/pdf-lib').PDFFont,
   x: number,
   y: number,
   w: number,
   h: number,
-  sampleText: string,
 ) {
-  // White cover so underlying digits aren't readable
+  // 1) Opaque white wipe — no ghosting of original numbers
   page.drawRectangle({
-    x: x - 0.5,
-    y: y - 0.5,
-    width: w + 1,
-    height: h + 1,
+    x: x - 0.4,
+    y: y - 0.4,
+    width: w + 0.8,
+    height: h + 0.8,
     color: rgb(1, 1, 1),
     borderWidth: 0,
   })
 
-  // Build mask string: keep separators, replace alphanumerics with *
-  // e.g. 555-123-4567 → ***-***-**** , email@x.com → *****@*.***
-  const masked = toAsteriskString(sampleText)
-  const fontSize = Math.max(6, Math.min(h * 0.85, 28))
-  const useFont = fontBold
-  let drawText = masked
-  let textW = useFont.widthOfTextAtSize(drawText, fontSize)
-
-  // Fit asterisks into the box width
-  if (textW > w * 0.98 && drawText.length > 1) {
-    // Prefer shrinking size first
-    let size = fontSize
-    while (size > 5 && useFont.widthOfTextAtSize(drawText, size) > w * 0.98) {
-      size -= 0.5
-    }
-    textW = useFont.widthOfTextAtSize(drawText, size)
-    if (textW > w * 0.98) {
-      // Truncate with enough stars to fill
-      const starW = useFont.widthOfTextAtSize('*', size)
-      const n = Math.max(3, Math.floor(w / Math.max(starW, 1)))
-      drawText = '*'.repeat(n)
-      textW = useFont.widthOfTextAtSize(drawText, size)
-    }
-    const baseline = y + (h - size) * 0.35
-    page.drawText(drawText, {
-      x: x + Math.max(0, (w - textW) / 2),
-      y: Math.max(y + 1, baseline),
-      size,
-      font: useFont,
-      color: rgb(0.15, 0.15, 0.15),
-    })
-    return
-  }
-
-  const baseline = y + (h - fontSize) * 0.35
-  page.drawText(drawText, {
-    x: x + Math.max(0, (w - textW) / 2),
-    y: Math.max(y + 1, baseline),
-    size: fontSize,
-    font: useFont,
-    color: rgb(0.15, 0.15, 0.15),
+  // 2) Subtle professional field background (light slate)
+  const inset = 0.4
+  page.drawRectangle({
+    x: x + inset,
+    y: y + inset,
+    width: Math.max(1, w - inset * 2),
+    height: Math.max(1, h - inset * 2),
+    color: rgb(0.96, 0.97, 0.98),
+    borderWidth: 0.4,
+    borderColor: rgb(0.88, 0.9, 0.92),
   })
-  void font
+
+  // 3) Font size: neat, readable, never oversized
+  const size = Math.max(7, Math.min(h * 0.62, 11))
+  const starW = mono.widthOfTextAtSize('*', size)
+  if (starW <= 0) return
+
+  // Horizontal padding inside field
+  const innerPad = Math.min(4, w * 0.08)
+  const usable = Math.max(starW * 3, w - innerPad * 2)
+
+  // Even number of stars that fit cleanly (prefer 4–24)
+  let count = Math.floor(usable / starW)
+  count = Math.max(4, Math.min(count, 24))
+  // Snap to even for visual balance
+  if (count % 2 === 1) count -= 1
+  if (count < 4) count = 4
+
+  const stars = '*'.repeat(count)
+  const textW = mono.widthOfTextAtSize(stars, size)
+
+  // Vertically center baseline in the box
+  const baseline = y + (h - size) / 2 + size * 0.12
+  // Horizontally center the star run
+  const textX = x + (w - textW) / 2
+
+  page.drawText(stars, {
+    x: Math.max(x + 1, textX),
+    y: Math.max(y + 1, baseline),
+    size,
+    font: mono,
+    color: rgb(0.35, 0.38, 0.42), // professional slate gray
+  })
 }
 
-/** Replace letters/digits with *; keep @ . - / spaces and similar structure */
+/** @deprecated kept for any external use — uniform stars preferred for clean output */
 export function toAsteriskString(raw: string): string {
   if (!raw || !raw.trim()) return '****'
-  return raw.replace(/[A-Za-z0-9]/g, '*')
+  const n = Math.max(4, Math.min(raw.replace(/\s/g, '').length, 16))
+  return '*'.repeat(n)
 }
 
 /** Soft mosaic blur: small gray tiles of varying shade */

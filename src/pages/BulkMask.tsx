@@ -520,7 +520,7 @@ export function BulkMask() {
                 }
               >
                 <option value="asterisk">
-                  Asterisks (****) — refined, replaces numbers/letters
+                  Clean asterisks (****) — professional uniform mask
                 </option>
                 <option value="blur">Soft blur / mosaic</option>
                 <option value="black">Black redaction bars</option>
