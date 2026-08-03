@@ -168,10 +168,7 @@ export function BulkMask() {
       setError('Enable at least one data type to mask.')
       return
     }
-    if (options.categories?.lastName && !options.lastNames?.trim()) {
-      setError('Last name masking is on — paste last names to mask (one per line).')
-      return
-    }
+    // Person names: auto-detect works without a list; list is optional
     if (saveMode === 'same' && !sourceDir) {
       setError(
         '“Same as source folder” needs a folder pick (not individual files). Select a folder, or choose another save location.',
@@ -439,6 +436,45 @@ export function BulkMask() {
           </div>
 
           <h2 className="bulk-section-title">2. What to mask</h2>
+          <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+            Everything is off by default — tick only what you want masked.
+          </p>
+          <div className="bulk-pick-row" style={{ marginBottom: 4 }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '0.3rem 0.65rem', fontSize: '0.78rem' }}
+              disabled={running}
+              onClick={() =>
+                setOptions((o) => {
+                  const categories = { ...o.categories }
+                  for (const c of MASK_CATEGORY_META) {
+                    if (c.id !== 'custom') categories[c.id] = true
+                  }
+                  return { ...o, categories }
+                })
+              }
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '0.3rem 0.65rem', fontSize: '0.78rem' }}
+              disabled={running}
+              onClick={() =>
+                setOptions((o) => {
+                  const categories = { ...o.categories }
+                  for (const c of MASK_CATEGORY_META) {
+                    categories[c.id] = false
+                  }
+                  return { ...o, categories }
+                })
+              }
+            >
+              Clear all
+            </button>
+          </div>
           <div className="bulk-cats">
             {MASK_CATEGORY_META.map((c) => (
               <label key={c.id} className="bulk-cat">

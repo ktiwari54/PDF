@@ -86,61 +86,61 @@ export const MASK_CATEGORY_META: {
     id: 'email',
     label: 'Email addresses',
     description: 'name@company.com',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'phone',
     label: 'Phone / contact numbers',
     description: 'Mobile, landline, international',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'lastName',
     label: 'Person names (auto)',
     description: 'Resume heading names, Full Name fields, optional name list',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'companyName',
     label: 'Company / business names',
     description: 'Auto-detect company names on invoices, letterheads, resumes',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'address',
     label: 'Addresses',
     description: 'Street, building, PO Box, labeled Address / Bill To lines',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'amount',
     label: 'Money amounts (bills)',
     description: 'Currency amounts like $1,200.00 or ₹5,000',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'ssn',
     label: 'Security & registration numbers',
     description: 'SSN, EIN, CIN, CR No, company registration, PAN, etc.',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'vat',
     label: 'VAT / Tax ID numbers',
     description: 'VAT, TIN, tax registration IDs',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'gst',
     label: 'GST numbers',
     description: 'GSTIN and labeled GST numbers',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'tradeLicense',
     label: 'Trade / commercial licenses',
     description: 'Trade license, commercial license, shop establishment',
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     id: 'custom',
@@ -1166,6 +1166,7 @@ export function defaultMaskOptions(): MaskOptions {
     categories[m.id] = m.defaultOn && m.id !== 'custom'
   }
   return {
+    // All categories off by default — user chooses what to mask
     categories,
     lastNames: '',
     companyNames: '',
