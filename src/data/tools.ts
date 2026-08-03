@@ -403,15 +403,15 @@ export const tools: ToolDef[] = [
   // Intelligence
   {
     id: 'ppt-maker',
-    name: 'CEO PPT Maker',
+    name: 'Dragon PPT',
     description:
-      'One prompt → board-ready PowerPoint with images, KPIs, roadmap. No API token required.',
+      'One prompt → extremely accurate board-ready PowerPoint with images, KPIs, roadmap. No API token required.',
     category: 'intelligence',
-    color: '#C9A227',
+    color: '#F07A28',
     icon: 'ppt-maker',
     accept: '*/*',
     multiple: false,
-    badge: 'CEO',
+    badge: 'Dragon',
   },
   {
     id: 'ai-summarizer',

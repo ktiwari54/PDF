@@ -7,7 +7,7 @@ import {
   ArrowLeft,
   LayoutTemplate,
   Image as ImageIcon,
-  Crown,
+  Flame,
 } from 'lucide-react'
 import {
   PPT_THEMES,
@@ -21,7 +21,7 @@ import { downloadBlob, baseName } from '../lib/pdfOps'
 
 const TONES = [
   { id: 'pitch', label: 'Investor / Pitch' },
-  { id: 'professional', label: 'CEO / Board' },
+  { id: 'professional', label: 'Board / Strategy' },
   { id: 'report', label: 'Exec Report' },
   { id: 'training', label: 'Leadership Training' },
 ] as const
@@ -35,7 +35,7 @@ const COUNTS = [
 
 const EXAMPLES = [
   'Series A pitch for an AI-powered invoice automation SaaS: problem, solution, market, product, GTM, traction, unit economics, team, and $8M raise.',
-  'CEO board update on Middle East expansion: performance, risks, capital plan, competitive moves, and decisions required this quarter.',
+  'Board update on Middle East expansion: performance, risks, capital plan, competitive moves, and decisions required this quarter.',
   'Enterprise digital transformation roadmap for a logistics group: current state, workstreams, ROI, governance, and 90-day plan.',
 ]
 
@@ -44,7 +44,7 @@ export function PptMaker() {
   const [author, setAuthor] = useState('Executive Team')
   const [tone, setTone] = useState<(typeof TONES)[number]['id']>('pitch')
   const [slideCount, setSlideCount] = useState<string>('auto')
-  const [themeId, setThemeId] = useState<PptThemeId>('boardroom')
+  const [themeId, setThemeId] = useState<PptThemeId>('dragon')
   const [outline, setOutline] = useState<DeckOutline | null>(null)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
@@ -63,12 +63,16 @@ export function PptMaker() {
     [themeId],
   )
 
+  function fileName(title: string) {
+    return `${baseName(title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'dragon-deck')}_DragonPPT.pptx`
+  }
+
   async function generate() {
     setError(null)
     setStatus(null)
     setBusy(true)
     try {
-      setStatus('Building CEO-level narrative from your prompt…')
+      setStatus('Dragon PPT: extracting facts & building prompt-accurate narrative…')
       let deck = outlineFromPrompt(prompt, {
         author,
         tone,
@@ -88,12 +92,12 @@ export function PptMaker() {
         setOutline(deck)
       }
 
-      setStatus('Composing slides and fetching executive visuals (no token)…')
+      setStatus('Composing Dragon PPT slides and fetching visuals (no token)…')
       const blob = await buildPptx(deck, themeId, setStatus)
-      const name = `${baseName(deck.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'executive-deck')}_CEO_dragonPDF.pptx`
+      const name = fileName(deck.title)
       downloadBlob(blob, name)
       setStatus(
-        `Done — ${deck.slides.length} slides with images · ${name}`,
+        `Done — ${deck.slides.length} high-accuracy slides · ${name}`,
       )
     } catch (e) {
       console.error(e)
@@ -109,11 +113,8 @@ export function PptMaker() {
     setError(null)
     try {
       const blob = await buildPptx(outline, themeId, setStatus)
-      downloadBlob(
-        blob,
-        `${baseName(outline.title.replace(/[^\w\s-]/g, '').slice(0, 40) || 'executive-deck')}_CEO_dragonPDF.pptx`,
-      )
-      setStatus('PPTX downloaded again.')
+      downloadBlob(blob, fileName(outline.title))
+      setStatus('Dragon PPT downloaded again.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
@@ -128,14 +129,16 @@ export function PptMaker() {
       </Link>
 
       <div className="tool-page-header">
-        <div className="tool-icon" style={{ background: '#C9A227' }}>
-          <Crown size={26} color="#0A0F1C" />
+        <div className="tool-icon" style={{ background: '#F07A28' }}>
+          <Flame size={26} color="#0C0E14" />
         </div>
         <div>
-          <h1>CEO PPT Maker</h1>
+          <h1>Dragon PPT</h1>
           <p>
-            One prompt → board-ready PowerPoint with executive structure,
-            metrics, timeline, and stock photography. <strong>No API token required.</strong>
+            One prompt → extremely accurate, board-ready PowerPoint. Pulls your
+            numbers, sections, regions, and claims into the deck — with
+            executive structure and stock photography.{' '}
+            <strong>No API token required.</strong>
           </p>
         </div>
       </div>
@@ -149,7 +152,7 @@ export function PptMaker() {
               rows={8}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the audience, goal, and what the deck must cover. Example: Series A pitch for AI invoice SaaS — problem, solution, market, product, GTM, traction, unit economics, team, $8M raise."
+              placeholder="Be specific for max accuracy: audience, goal, $ figures, regions, and the sections to cover. Example: Series A pitch for AI invoice SaaS — problem, solution, market, product, GTM, traction, unit economics, team, $8M raise."
             />
           </label>
 
@@ -201,7 +204,7 @@ export function PptMaker() {
               <input
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
-                placeholder="CEO / Company name"
+                placeholder="Company / presenter name"
               />
             </label>
           </div>
@@ -236,13 +239,14 @@ export function PptMaker() {
 
           <div className="bulk-keep-note">
             <strong>
-              <ImageIcon size={14} style={{ verticalAlign: -2 }} /> Included
-              automatically (no token)
+              <ImageIcon size={14} style={{ verticalAlign: -2 }} /> Dragon PPT
+              accuracy (no token)
             </strong>
             <span>
-              Executive title · Agenda · KPI snapshot · Image+text layouts ·
-              Two-column analysis · Priority cards · 90-day roadmap · Leadership
-              takeaway · Closing · Stock photography matched to your topic
+              Extracts $ figures, %, regions, and your section list · Agenda
+              mirrors your brief · KPI cards from real numbers · Image+text ·
+              Two-column analysis · Priority cards · 90-day roadmap tied to your
+              subject · Leadership takeaway · Closing next steps
             </span>
           </div>
 
@@ -277,7 +281,7 @@ export function PptMaker() {
               onClick={() => void generate()}
             >
               <Sparkles size={16} />
-              {busy ? 'Creating CEO deck…' : 'Generate CEO PowerPoint'}
+              {busy ? 'Creating Dragon PPT…' : 'Generate Dragon PPT'}
             </button>
             {outline && (
               <button
@@ -304,7 +308,7 @@ export function PptMaker() {
             <div className="ppt-empty">
               <Presentation size={40} strokeWidth={1.25} />
               <p>
-                Your board narrative appears here. Theme:{' '}
+                Your high-accuracy Dragon PPT outline appears here. Theme:{' '}
                 <strong>{theme.name}</strong>
               </p>
             </div>
