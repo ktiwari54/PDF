@@ -229,14 +229,16 @@ export const tools: ToolDef[] = [
   },
   {
     id: 'pdf-to-excel',
-    name: 'PDF to Excel',
+    name: 'PDF / Image to Excel',
     description:
-      'Pull data straight from PDFs into Excel spreadsheets in a few short seconds.',
+      'Extract tables from PDFs or images into .xlsx. Layout detection for text PDFs; OCR for scans and photos.',
     category: 'convert-from',
     color: '#34d399',
     icon: 'pdf-excel',
-    accept: 'application/pdf',
-    multiple: false,
+    accept:
+      'application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff',
+    multiple: true,
+    badge: 'OCR',
   },
   {
     id: 'pdf-to-pdfa',

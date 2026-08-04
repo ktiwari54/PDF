@@ -18,6 +18,7 @@ export function Header() {
           </Link>
           <Link to="/editor">Live Edit</Link>
           <Link to="/ppt-maker">Dragon PPT</Link>
+          <Link to="/pdf-to-excel">PDF→Excel</Link>
           <Link to="/tools/merge-pdf">Merge</Link>
           <Link to="/tools/split-pdf">Split</Link>
           <Link to="/">All tools</Link>

@@ -879,25 +879,472 @@ export async function pdfToWord(file: File): Promise<Blob> {
   return new Blob(['\ufeff', html], { type: 'application/msword' })
 }
 
-export async function pdfToExcel(file: File): Promise<Blob> {
-  const text = await extractText(file)
-  const rows = text
-    .split(/\n+/)
-    .map((line) => {
-      if (line.includes('\t')) return line.split('\t')
-      if (line.includes(',')) return line.split(',').map((c) => c.trim())
-      return line.split(/\s{2,}/).filter(Boolean)
-    })
-    .filter((r) => r.some((c) => String(c).trim()))
-  const ws = XLSX.utils.aoa_to_sheet(
-    rows.length ? rows : [['(no structured text found — try OCR)']],
-  )
+export type ToExcelOptions = {
+  /** auto: OCR when little text; always | never */
+  ocrMode?: 'auto' | 'always' | 'never'
+  ocrLang?: string
+  onProgress?: (msg: string) => void
+}
+
+type TextToken = {
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * PDF or image → Excel (.xlsx).
+ * Digital PDFs: position-aware table rebuild.
+ * Scans / images: OCR with word bounding boxes → columns/rows.
+ */
+export async function pdfToExcel(
+  file: File,
+  options: ToExcelOptions = {},
+): Promise<Blob> {
+  return filesToExcel([file], options)
+}
+
+/** One or more PDFs/images → single workbook (sheet per page/file). */
+export async function filesToExcel(
+  files: File[],
+  options: ToExcelOptions = {},
+): Promise<Blob> {
+  if (!files.length) throw new Error('Add a PDF or image file.')
+  const ocrMode = options.ocrMode ?? 'auto'
+  const ocrLang = options.ocrLang || 'eng'
+  const onProgress = options.onProgress
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  let sheetCount = 0
+
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi]
+    const isImg =
+      file.type.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name)
+
+    if (isImg) {
+      onProgress?.(
+        `OCR image ${fi + 1}/${files.length}: ${file.name}…`,
+      )
+      const grid = await ocrSourceToGrid(file, ocrLang, (m) =>
+        onProgress?.(m),
+      )
+      const name = uniqueSheetName(
+        wb,
+        safeSheetName(baseName(file.name) || `Image${fi + 1}`),
+      )
+      appendGridSheet(wb, name, grid, `Image: ${file.name}`)
+      sheetCount++
+      continue
+    }
+
+    // PDF
+    onProgress?.(`Reading PDF ${fi + 1}/${files.length}: ${file.name}…`)
+    const data = await fileToBytes(file)
+    const pdf = await pdfjs.getDocument({ data: data.slice() }).promise
+    for (let p = 1; p <= pdf.numPages; p++) {
+      onProgress?.(
+        `Page ${p}/${pdf.numPages} of ${file.name}…`,
+      )
+      const page = await pdf.getPage(p)
+      const tokens = await extractPageTokens(page)
+      const textLen = tokens.reduce((n, t) => n + t.text.trim().length, 0)
+      const forceOcr = ocrMode === 'always'
+      const autoOcr = ocrMode === 'auto' && textLen < 40
+      let grid: string[][]
+
+      if (forceOcr || autoOcr) {
+        onProgress?.(
+          `OCR page ${p}/${pdf.numPages} (${ocrLang})… first run may download language data`,
+        )
+        const canvas = await renderPdfPageToCanvas(page, 2)
+        grid = await ocrCanvasToGrid(canvas, ocrLang, (m) => onProgress?.(m))
+        // If OCR empty but we had some tokens, fall back
+        if (!gridHasData(grid) && tokens.length) grid = tokensToGrid(tokens)
+      } else {
+        grid = tokensToGrid(tokens)
+        // still weak? try OCR once
+        if (ocrMode === 'auto' && !gridHasData(grid)) {
+          onProgress?.(`Little structure on page ${p} — trying OCR…`)
+          const canvas = await renderPdfPageToCanvas(page, 2)
+          const ocrGrid = await ocrCanvasToGrid(canvas, ocrLang, (m) =>
+            onProgress?.(m),
+          )
+          if (gridHasData(ocrGrid)) grid = ocrGrid
+        }
+      }
+
+      const base =
+        pdf.numPages === 1 && files.length === 1
+          ? 'Data'
+          : files.length === 1
+            ? `Page ${p}`
+            : `${safeSheetName(baseName(file.name)).slice(0, 18)}_p${p}`
+      const name = uniqueSheetName(wb, base)
+      appendGridSheet(
+        wb,
+        name,
+        grid,
+        `${file.name} · page ${p}${forceOcr || autoOcr ? ' · OCR' : ''}`,
+      )
+      sheetCount++
+    }
+  }
+
+  if (!sheetCount) {
+    throw new Error('No pages or images could be converted.')
+  }
+
+  onProgress?.('Building Excel workbook…')
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
   return new Blob([out], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
+}
+
+function gridHasData(grid: string[][]): boolean {
+  return grid.some((row) =>
+    row.some((c) => String(c ?? '').trim().length > 0),
+  )
+}
+
+function appendGridSheet(
+  wb: XLSX.WorkBook,
+  name: string,
+  grid: string[][],
+  sourceLabel: string,
+) {
+  const rows =
+    gridHasData(grid) && grid.length
+      ? grid
+      : [
+          ['(no table text detected)'],
+          ['Tip: enable OCR Always for scans, or use a clearer image.'],
+          [`Source: ${sourceLabel}`],
+        ]
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  // rough column widths
+  const colCount = Math.max(...rows.map((r) => r.length), 1)
+  ws['!cols'] = Array.from({ length: colCount }, (_, i) => {
+    let max = 8
+    for (const r of rows) {
+      const len = String(r[i] ?? '').length
+      if (len > max) max = len
+    }
+    return { wch: Math.min(48, Math.max(10, max + 2)) }
+  })
+  XLSX.utils.book_append_sheet(wb, ws, name)
+}
+
+function safeSheetName(s: string): string {
+  return (
+    s
+      .replace(/[\\/?*[\]:]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 28) || 'Sheet'
+  )
+}
+
+function uniqueSheetName(wb: XLSX.WorkBook, base: string): string {
+  let name = safeSheetName(base).slice(0, 31)
+  let i = 2
+  while (wb.SheetNames.includes(name)) {
+    const suffix = `_${i++}`
+    name = (safeSheetName(base).slice(0, 31 - suffix.length) + suffix).slice(
+      0,
+      31,
+    )
+  }
+  return name
+}
+
+async function extractPageTokens(
+  page: pdfjs.PDFPageProxy,
+): Promise<TextToken[]> {
+  const content = await page.getTextContent()
+  const viewport = page.getViewport({ scale: 1 })
+  const tokens: TextToken[] = []
+  for (const item of content.items) {
+    if (!('str' in item)) continue
+    const it = item as {
+      str: string
+      transform: number[]
+      width: number
+      height: number
+    }
+    const str = String(it.str)
+    if (!str.trim()) continue
+    const m = pdfjs.Util.transform(viewport.transform, it.transform)
+    const fontH = Math.hypot(m[2], m[3]) || 10
+    const fontW = Math.hypot(m[0], m[1]) || 1
+    const x = m[4]
+    // viewport y grows downward after transform; use top-left-ish
+    const y = m[5] - fontH * 0.8
+    const w = (it.width || str.length * 0.5) * fontW
+    tokens.push({
+      text: str,
+      x,
+      y,
+      w: Math.max(w, fontH * 0.3),
+      h: Math.max(fontH, 6),
+    })
+  }
+  return tokens
+}
+
+async function renderPdfPageToCanvas(
+  page: pdfjs.PDFPageProxy,
+  scale: number,
+): Promise<HTMLCanvasElement> {
+  const viewport = page.getViewport({ scale })
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.floor(viewport.width)
+  canvas.height = Math.floor(viewport.height)
+  const ctx = canvas.getContext('2d')!
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    canvas,
+  } as Parameters<typeof page.render>[0]).promise
+  return canvas
+}
+
+async function ocrSourceToGrid(
+  source: File | HTMLCanvasElement | string,
+  lang: string,
+  onProgress?: (msg: string) => void,
+): Promise<string[][]> {
+  let input: File | HTMLCanvasElement | string = source
+  let objectUrl: string | null = null
+  if (source instanceof File) {
+    objectUrl = URL.createObjectURL(source)
+    input = objectUrl
+  }
+  try {
+    const result = await Tesseract.recognize(input, lang, {
+      logger: (m) => {
+        if (m.status === 'recognizing text' && m.progress != null) {
+          onProgress?.(`OCR ${Math.round(m.progress * 100)}%`)
+        }
+      },
+    })
+    type OcrWord = {
+      text: string
+      confidence?: number
+      bbox: { x0: number; y0: number; x1: number; y1: number }
+    }
+    const data = result.data as {
+      text?: string
+      words?: OcrWord[]
+    }
+    const words = (data.words || [])
+      .filter((w) => w.text && w.text.trim() && (w.confidence ?? 0) > 25)
+      .map((w) => ({
+        text: w.text.trim(),
+        x: w.bbox.x0,
+        y: w.bbox.y0,
+        w: Math.max(1, w.bbox.x1 - w.bbox.x0),
+        h: Math.max(1, w.bbox.y1 - w.bbox.y0),
+      }))
+    if (words.length >= 3) return tokensToGrid(words)
+    // fallback: line split of plain text
+    return plainTextToGrid(data.text || '')
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function ocrCanvasToGrid(
+  canvas: HTMLCanvasElement,
+  lang: string,
+  onProgress?: (msg: string) => void,
+): Promise<string[][]> {
+  return ocrSourceToGrid(canvas, lang, onProgress)
+}
+
+/** Cluster positioned tokens into a rectangular table. */
+export function tokensToGrid(tokens: TextToken[]): string[][] {
+  if (!tokens.length) return []
+  const cleaned = tokens
+    .map((t) => ({ ...t, text: t.text.replace(/\s+/g, ' ').trim() }))
+    .filter((t) => t.text)
+
+  // Sort reading order
+  const sorted = [...cleaned].sort((a, b) => a.y - b.y || a.x - b.x)
+  const heights = sorted.map((t) => t.h).sort((a, b) => a - b)
+  const medH = heights[Math.floor(heights.length / 2)] || 12
+  const rowTol = Math.max(medH * 0.55, 4)
+
+  // Build lines
+  type Line = { y: number; items: TextToken[] }
+  const lines: Line[] = []
+  for (const t of sorted) {
+    const last = lines[lines.length - 1]
+    if (last && Math.abs(t.y - last.y) <= rowTol) {
+      last.items.push(t)
+      last.y = (last.y * (last.items.length - 1) + t.y) / last.items.length
+    } else {
+      lines.push({ y: t.y, items: [t] })
+    }
+  }
+
+  // Within each line, merge adjacent tokens into cells on small gaps
+  const lineCells: { x: number; text: string }[][] = lines.map((line) => {
+    const items = [...line.items].sort((a, b) => a.x - b.x)
+    const cells: { x: number; text: string }[] = []
+    let cur: { x: number; text: string; right: number } | null = null
+    const gapMerge = medH * 0.85
+    for (const it of items) {
+      if (!cur) {
+        cur = { x: it.x, text: it.text, right: it.x + it.w }
+        continue
+      }
+      const gap = it.x - cur.right
+      if (gap < gapMerge) {
+        const space = gap > medH * 0.12 ? ' ' : ''
+        cur.text += space + it.text
+        cur.right = Math.max(cur.right, it.x + it.w)
+      } else {
+        cells.push({ x: cur.x, text: cur.text })
+        cur = { x: it.x, text: it.text, right: it.x + it.w }
+      }
+    }
+    if (cur) cells.push({ x: cur.x, text: cur.text })
+    return cells
+  })
+
+  // Global column anchors from multi-cell rows
+  const anchors: number[] = []
+  for (const cells of lineCells) {
+    if (cells.length >= 2) {
+      for (const c of cells) anchors.push(c.x)
+    }
+  }
+  // If almost everything is single-column, try delimiter parse on full lines
+  const multi = lineCells.filter((c) => c.length >= 2).length
+  if (multi < Math.max(2, lineCells.length * 0.15)) {
+    const plain = lines
+      .map((l) =>
+        [...l.items]
+          .sort((a, b) => a.x - b.x)
+          .map((i) => i.text)
+          .join(' '),
+      )
+      .join('\n')
+    const delim = plainTextToGrid(plain)
+    if (delim.some((r) => r.length >= 2)) return delim
+  }
+
+  const colXs = clusterColumnAnchors(anchors.length ? anchors : sorted.map((t) => t.x))
+  if (!colXs.length) {
+    return lineCells.map((cells) => [cells.map((c) => c.text).join(' ')])
+  }
+
+  // Assign cells to columns
+  const grid: string[][] = lineCells.map((cells) => {
+    const row = Array(colXs.length).fill('')
+    for (const c of cells) {
+      let best = 0
+      let bestDist = Infinity
+      for (let i = 0; i < colXs.length; i++) {
+        const d = Math.abs(c.x - colXs[i])
+        if (d < bestDist) {
+          bestDist = d
+          best = i
+        }
+      }
+      row[best] = row[best] ? `${row[best]} ${c.text}` : c.text
+    }
+    return row
+  })
+
+  // Drop fully empty columns
+  const keep: number[] = []
+  for (let c = 0; c < colXs.length; c++) {
+    if (grid.some((r) => String(r[c] || '').trim())) keep.push(c)
+  }
+  const slim = grid
+    .map((r) => keep.map((i) => r[i] || ''))
+    .filter((r) => r.some((c) => c.trim()))
+
+  return slim.length ? slim : [['(empty)']]
+}
+
+function clusterColumnAnchors(xs: number[]): number[] {
+  if (!xs.length) return []
+  const sorted = [...xs].sort((a, b) => a - b)
+  // gap threshold: larger of 24px or 4% of span
+  const span = sorted[sorted.length - 1] - sorted[0] || 1
+  const gapTol = Math.max(24, span * 0.045)
+  const clusters: number[][] = [[sorted[0]]]
+  for (let i = 1; i < sorted.length; i++) {
+    const last = clusters[clusters.length - 1]
+    if (sorted[i] - last[last.length - 1] > gapTol) clusters.push([sorted[i]])
+    else last.push(sorted[i])
+  }
+  return clusters.map((c) => c.reduce((a, b) => a + b, 0) / c.length)
+}
+
+function plainTextToGrid(text: string): string[][] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\u00a0/g, ' ').trimEnd())
+    .filter((l) => l.trim().length)
+  if (!lines.length) return []
+
+  const rows = lines.map((line) => {
+    if (line.includes('\t')) {
+      return line.split('\t').map((c) => c.trim())
+    }
+    // pipe tables
+    if ((line.match(/\|/g) || []).length >= 2) {
+      return line
+        .split('|')
+        .map((c) => c.trim())
+        .filter((c, i, arr) => !(i === 0 && !c) && !(i === arr.length - 1 && !c))
+    }
+    // CSV-ish
+    if ((line.match(/,/g) || []).length >= 2) {
+      return splitCsvLine(line)
+    }
+    // multi-space columns
+    if (/\s{2,}/.test(line)) {
+      return line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    }
+    return [line.trim()]
+  })
+
+  // normalize column count
+  const maxC = Math.max(...rows.map((r) => r.length), 1)
+  return rows.map((r) => {
+    const copy = [...r]
+    while (copy.length < maxC) copy.push('')
+    return copy
+  })
+}
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let inQ = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      inQ = !inQ
+      continue
+    }
+    if (ch === ',' && !inQ) {
+      out.push(cur.trim())
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  out.push(cur.trim())
+  return out
 }
 
 export async function pdfToPowerpoint(file: File): Promise<Blob> {

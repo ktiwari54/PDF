@@ -5,6 +5,7 @@ import { ToolPage } from './pages/ToolPage'
 import { LiveEditor } from './pages/LiveEditor'
 import { PptMaker } from './pages/PptMaker'
 import { BulkMask } from './pages/BulkMask'
+import { PdfToExcel } from './pages/PdfToExcel'
 
 export default function App() {
   const location = useLocation()
@@ -30,6 +31,8 @@ export default function App() {
         <Route path="/tools/ppt-maker" element={<PptMaker />} />
         <Route path="/bulk-mask" element={<BulkMask />} />
         <Route path="/tools/bulk-mask" element={<BulkMask />} />
+        <Route path="/pdf-to-excel" element={<PdfToExcel />} />
+        <Route path="/tools/pdf-to-excel" element={<PdfToExcel />} />
         <Route path="/tools/:toolId" element={<ToolPage />} />
         <Route path="/editor" element={<LiveEditor />} />
       </Routes>

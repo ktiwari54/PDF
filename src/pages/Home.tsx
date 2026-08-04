@@ -62,9 +62,12 @@ export function Home() {
           <Link to="/ppt-maker" className="btn btn-ghost">
             Dragon PPT
           </Link>
+          <Link to="/pdf-to-excel" className="btn btn-ghost">
+            PDF / Image → Excel
+          </Link>
         </div>
         <p className="muted" style={{ marginTop: '0.85rem', fontSize: '0.85rem' }}>
-          Also under <strong>Security → Bulk PDF Masker</strong>, or search “mask”
+          Also under <strong>Security → Bulk PDF Masker</strong>, or search “mask” / “excel”
         </p>
         <div className="search-bar">
           <Search size={18} />

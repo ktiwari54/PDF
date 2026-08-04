@@ -263,8 +263,15 @@ export function ToolPage() {
           break
         }
         case 'pdf-to-excel': {
-          const blob = await ops.pdfToExcel(f)
-          ops.downloadBlob(blob, `${ops.baseName(f.name)}.xlsx`)
+          const blob = await ops.filesToExcel(files, {
+            ocrMode: 'auto',
+            onProgress: (msg) => setStatus({ type: 'info', msg }),
+          })
+          const name =
+            files.length === 1
+              ? `${ops.baseName(f.name)}.xlsx`
+              : `dragonPDF_tables_${Date.now()}.xlsx`
+          ops.downloadBlob(blob, name)
           break
         }
         case 'pdf-to-pdfa': {
