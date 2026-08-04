@@ -153,9 +153,12 @@ export function PdfToExcel() {
         <div>
           <h1>PDF / Image to Excel</h1>
           <p>
-            Extract tables and text from PDFs or photos into an{' '}
-            <strong>.xlsx</strong> spreadsheet. Digital PDFs use layout
-            detection; scans and images use OCR — all in your browser.
+            Upload a PDF or image of a table — get an <strong>.xlsx</strong>{' '}
+            with the <strong>same values</strong> and{' '}
+            <strong>same cell positions</strong> as far as the layout allows.
+            Text PDFs keep exact characters (no retyping). Scans use OCR with
+            word boxes. Excel stores every cell as text so numbers and IDs are
+            not auto-changed.
           </p>
         </div>
       </div>
@@ -275,12 +278,20 @@ export function PdfToExcel() {
 
         <div className="bulk-keep-note">
           <strong>
-            <Table2 size={14} style={{ verticalAlign: -2 }} /> How it works
+            <Table2 size={14} style={{ verticalAlign: -2 }} /> Value & position
+            fidelity
           </strong>
           <span>
-            Text PDFs: words are clustered into rows and columns by position.
-            Images & scans: Tesseract OCR rebuilds a grid from word boxes. Each
-            PDF page becomes a sheet; each image is its own sheet.
+            • Values are not rewritten or recalculated — only mapped into
+            cells.
+            <br />
+            • Rows/columns follow on-page X/Y positions (not free text dump).
+            <br />
+            • Excel cells are saved as text so leading zeros, amounts, and IDs
+            stay unchanged.
+            <br />
+            • Photos/scans: use <b>Always OCR</b> for best table layout. Clear,
+            upright images work best.
           </span>
         </div>
 

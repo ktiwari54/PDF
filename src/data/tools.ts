@@ -231,7 +231,7 @@ export const tools: ToolDef[] = [
     id: 'pdf-to-excel',
     name: 'PDF / Image to Excel',
     description:
-      'Extract tables from PDFs or images into .xlsx. Layout detection for text PDFs; OCR for scans and photos.',
+      'Upload PDF or table image → Excel with values and cell positions preserved. Exact text for digital PDFs; OCR for scans.',
     category: 'convert-from',
     color: '#34d399',
     icon: 'pdf-excel',

@@ -894,10 +894,25 @@ type TextToken = {
   h: number
 }
 
+type TableCell = {
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+  /** right edge */
+  right: number
+  /** horizontal center */
+  cx: number
+  /** vertical center */
+  cy: number
+}
+
 /**
  * PDF or image → Excel (.xlsx).
- * Digital PDFs: position-aware table rebuild.
- * Scans / images: OCR with word bounding boxes → columns/rows.
+ * Preserves table values and cell positions as faithfully as possible.
+ * Digital PDFs use exact embedded text (values never retyped).
+ * Scans / images use OCR word boxes mapped into the same grid.
  */
 export async function pdfToExcel(
   file: File,
@@ -926,7 +941,7 @@ export async function filesToExcel(
 
     if (isImg) {
       onProgress?.(
-        `OCR image ${fi + 1}/${files.length}: ${file.name}…`,
+        `Reading table from image ${fi + 1}/${files.length}: ${file.name}…`,
       )
       const grid = await ocrSourceToGrid(file, ocrLang, (m) =>
         onProgress?.(m),
@@ -940,39 +955,45 @@ export async function filesToExcel(
       continue
     }
 
-    // PDF
+    // PDF — prefer embedded text so values stay exact
     onProgress?.(`Reading PDF ${fi + 1}/${files.length}: ${file.name}…`)
     const data = await fileToBytes(file)
     const pdf = await pdfjs.getDocument({ data: data.slice() }).promise
     for (let p = 1; p <= pdf.numPages; p++) {
-      onProgress?.(
-        `Page ${p}/${pdf.numPages} of ${file.name}…`,
-      )
+      onProgress?.(`Page ${p}/${pdf.numPages} of ${file.name}…`)
       const page = await pdf.getPage(p)
       const tokens = await extractPageTokens(page)
       const textLen = tokens.reduce((n, t) => n + t.text.trim().length, 0)
       const forceOcr = ocrMode === 'always'
       const autoOcr = ocrMode === 'auto' && textLen < 40
       let grid: string[][]
+      let usedOcr = false
 
       if (forceOcr || autoOcr) {
         onProgress?.(
-          `OCR page ${p}/${pdf.numPages} (${ocrLang})… first run may download language data`,
+          `OCR page ${p}/${pdf.numPages} (${ocrLang}) — keeping word positions…`,
         )
-        const canvas = await renderPdfPageToCanvas(page, 2)
+        // Higher scale = better OCR position accuracy
+        const canvas = await renderPdfPageToCanvas(page, 2.75)
         grid = await ocrCanvasToGrid(canvas, ocrLang, (m) => onProgress?.(m))
-        // If OCR empty but we had some tokens, fall back
-        if (!gridHasData(grid) && tokens.length) grid = tokensToGrid(tokens)
+        usedOcr = true
+        if (!gridHasData(grid) && tokens.length) {
+          grid = tokensToGrid(tokens)
+          usedOcr = false
+        }
       } else {
+        // Exact PDF text — values unchanged from the file
         grid = tokensToGrid(tokens)
-        // still weak? try OCR once
         if (ocrMode === 'auto' && !gridHasData(grid)) {
-          onProgress?.(`Little structure on page ${p} — trying OCR…`)
-          const canvas = await renderPdfPageToCanvas(page, 2)
+          onProgress?.(`No text layer on page ${p} — OCR with positions…`)
+          const canvas = await renderPdfPageToCanvas(page, 2.75)
           const ocrGrid = await ocrCanvasToGrid(canvas, ocrLang, (m) =>
             onProgress?.(m),
           )
-          if (gridHasData(ocrGrid)) grid = ocrGrid
+          if (gridHasData(ocrGrid)) {
+            grid = ocrGrid
+            usedOcr = true
+          }
         }
       }
 
@@ -987,7 +1008,7 @@ export async function filesToExcel(
         wb,
         name,
         grid,
-        `${file.name} · page ${p}${forceOcr || autoOcr ? ' · OCR' : ''}`,
+        `${file.name} · page ${p}${usedOcr ? ' · OCR' : ' · exact text'}`,
       )
       sheetCount++
     }
@@ -997,8 +1018,12 @@ export async function filesToExcel(
     throw new Error('No pages or images could be converted.')
   }
 
-  onProgress?.('Building Excel workbook…')
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+  onProgress?.('Building Excel workbook (values as text — unchanged)…')
+  const out = XLSX.write(wb, {
+    bookType: 'xlsx',
+    type: 'array',
+    cellStyles: true,
+  })
   return new Blob([out], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
@@ -1010,6 +1035,10 @@ function gridHasData(grid: string[][]): boolean {
   )
 }
 
+/**
+ * Write every cell as Excel text (@) so values are not auto-converted
+ * (leading zeros, long IDs, decimals, dates stay exactly as extracted).
+ */
 function appendGridSheet(
   wb: XLSX.WorkBook,
   name: string,
@@ -1018,24 +1047,54 @@ function appendGridSheet(
 ) {
   const rows =
     gridHasData(grid) && grid.length
-      ? grid
+      ? grid.map((r) => r.map((c) => preserveCellValue(c)))
       : [
           ['(no table text detected)'],
-          ['Tip: enable OCR Always for scans, or use a clearer image.'],
+          ['Tip: use OCR Always for scans/photos, or a clearer image.'],
           [`Source: ${sourceLabel}`],
         ]
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  // rough column widths
+
+  const ws: XLSX.WorkSheet = {}
   const colCount = Math.max(...rows.map((r) => r.length), 1)
+  const rowCount = rows.length
+
+  for (let r = 0; r < rowCount; r++) {
+    for (let c = 0; c < colCount; c++) {
+      const raw = rows[r][c] ?? ''
+      const ref = XLSX.utils.encode_cell({ r, c })
+      // Force string type + text format — Excel will not reformat numbers
+      ws[ref] = {
+        t: 's',
+        v: String(raw),
+        z: '@',
+      }
+    }
+  }
+  ws['!ref'] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: Math.max(0, rowCount - 1), c: Math.max(0, colCount - 1) },
+  })
   ws['!cols'] = Array.from({ length: colCount }, (_, i) => {
     let max = 8
-    for (const r of rows) {
-      const len = String(r[i] ?? '').length
+    for (const row of rows) {
+      const len = String(row[i] ?? '').length
       if (len > max) max = len
     }
-    return { wch: Math.min(48, Math.max(10, max + 2)) }
+    return { wch: Math.min(56, Math.max(10, max + 2)) }
   })
   XLSX.utils.book_append_sheet(wb, ws, name)
+}
+
+/** Keep value as-is; only normalize pure whitespace noise. */
+function preserveCellValue(v: unknown): string {
+  if (v == null) return ''
+  // Do not parse numbers / dates — return exact characters
+  return String(v)
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\t\r]+/g, ' ')
+    .replace(/ +$/g, '')
+    .replace(/^ +/g, (s) => (s.length > 1 ? s : s)) // keep single leading space rare; trim edges lightly
+    .trim()
 }
 
 function safeSheetName(s: string): string {
@@ -1075,21 +1134,26 @@ async function extractPageTokens(
       width: number
       height: number
     }
+    // Keep exact string; only skip pure whitespace
     const str = String(it.str)
-    if (!str.trim()) continue
+    if (!str.replace(/\s/g, '').length) continue
     const m = pdfjs.Util.transform(viewport.transform, it.transform)
     const fontH = Math.hypot(m[2], m[3]) || 10
-    const fontW = Math.hypot(m[0], m[1]) || 1
+    const scaleX = Math.hypot(m[0], m[1]) || 1
     const x = m[4]
-    // viewport y grows downward after transform; use top-left-ish
-    const y = m[5] - fontH * 0.8
-    const w = (it.width || str.length * 0.5) * fontW
+    const y = m[5] - fontH * 0.75
+    // item.width is in text-space units; scale to viewport X
+    const w =
+      typeof it.width === 'number' && it.width > 0
+        ? Math.max(it.width * scaleX, fontH * 0.2)
+        : Math.max(str.length * fontH * 0.45, fontH * 0.25)
+
     tokens.push({
       text: str,
       x,
       y,
-      w: Math.max(w, fontH * 0.3),
-      h: Math.max(fontH, 6),
+      w,
+      h: Math.max(fontH, 5),
     })
   }
   return tokens
@@ -1130,27 +1194,60 @@ async function ocrSourceToGrid(
           onProgress?.(`OCR ${Math.round(m.progress * 100)}%`)
         }
       },
-    })
+      // Table-friendly page segmentation + keep spacing for multi-column rows
+    } as Parameters<typeof Tesseract.recognize>[2])
+
     type OcrWord = {
       text: string
       confidence?: number
       bbox: { x0: number; y0: number; x1: number; y1: number }
     }
+    type OcrLine = {
+      text?: string
+      bbox?: { x0: number; y0: number; x1: number; y1: number }
+      words?: OcrWord[]
+    }
     const data = result.data as {
       text?: string
       words?: OcrWord[]
+      lines?: OcrLine[]
     }
+
+    // Prefer line → word structure (best row fidelity)
+    if (data.lines?.length) {
+      const tokens: TextToken[] = []
+      for (const line of data.lines) {
+        const words = (line.words || []).filter(
+          (w) => w.text && w.text.replace(/\s/g, '').length && (w.confidence ?? 50) >= 20,
+        )
+        for (const w of words) {
+          tokens.push({
+            text: w.text, // exact OCR token — no rewrite
+            x: w.bbox.x0,
+            y: w.bbox.y0,
+            w: Math.max(1, w.bbox.x1 - w.bbox.x0),
+            h: Math.max(1, w.bbox.y1 - w.bbox.y0),
+          })
+        }
+      }
+      if (tokens.length >= 2) return tokensToGrid(tokens)
+    }
+
     const words = (data.words || [])
-      .filter((w) => w.text && w.text.trim() && (w.confidence ?? 0) > 25)
+      .filter(
+        (w) =>
+          w.text &&
+          w.text.replace(/\s/g, '').length &&
+          (w.confidence ?? 0) >= 20,
+      )
       .map((w) => ({
-        text: w.text.trim(),
+        text: w.text,
         x: w.bbox.x0,
         y: w.bbox.y0,
         w: Math.max(1, w.bbox.x1 - w.bbox.x0),
         h: Math.max(1, w.bbox.y1 - w.bbox.y0),
       }))
-    if (words.length >= 3) return tokensToGrid(words)
-    // fallback: line split of plain text
+    if (words.length >= 2) return tokensToGrid(words)
     return plainTextToGrid(data.text || '')
   } finally {
     if (objectUrl) URL.revokeObjectURL(objectUrl)
@@ -1165,127 +1262,256 @@ async function ocrCanvasToGrid(
   return ocrSourceToGrid(canvas, lang, onProgress)
 }
 
-/** Cluster positioned tokens into a rectangular table. */
+/**
+ * High-fidelity position → table:
+ * - Rows by vertical center clustering (keeps row order)
+ * - Cells by horizontal gaps (does not glue separate columns)
+ * - Columns by global x-anchor clustering (same column across rows)
+ * - Cell text = exact concatenation of tokens in that cell only
+ */
 export function tokensToGrid(tokens: TextToken[]): string[][] {
   if (!tokens.length) return []
+
+  // Keep exact text; only drop pure-whitespace tokens
   const cleaned = tokens
-    .map((t) => ({ ...t, text: t.text.replace(/\s+/g, ' ').trim() }))
-    .filter((t) => t.text)
+    .map((t) => ({
+      ...t,
+      text: t.text.replace(/\u00a0/g, ' '),
+    }))
+    .filter((t) => t.text.replace(/\s/g, '').length)
 
-  // Sort reading order
-  const sorted = [...cleaned].sort((a, b) => a.y - b.y || a.x - b.x)
-  const heights = sorted.map((t) => t.h).sort((a, b) => a - b)
+  if (!cleaned.length) return []
+
+  const withCy = cleaned.map((t) => ({
+    ...t,
+    cy: t.y + t.h / 2,
+    cx: t.x + t.w / 2,
+    right: t.x + t.w,
+  }))
+
+  const heights = withCy.map((t) => t.h).sort((a, b) => a - b)
   const medH = heights[Math.floor(heights.length / 2)] || 12
-  const rowTol = Math.max(medH * 0.55, 4)
+  // Tighter row tolerance so distinct table rows stay separate
+  const rowTol = Math.max(medH * 0.45, 3)
 
-  // Build lines
-  type Line = { y: number; items: TextToken[] }
+  // —— Rows by vertical center ——
+  const byY = [...withCy].sort((a, b) => a.cy - b.cy || a.x - b.x)
+  type Line = { cy: number; items: typeof withCy }
   const lines: Line[] = []
-  for (const t of sorted) {
-    const last = lines[lines.length - 1]
-    if (last && Math.abs(t.y - last.y) <= rowTol) {
-      last.items.push(t)
-      last.y = (last.y * (last.items.length - 1) + t.y) / last.items.length
+  for (const t of byY) {
+    let best: Line | null = null
+    let bestD = Infinity
+    for (const line of lines) {
+      const d = Math.abs(t.cy - line.cy)
+      if (d < bestD) {
+        bestD = d
+        best = line
+      }
+    }
+    if (best && bestD <= rowTol) {
+      best.items.push(t)
+      best.cy =
+        best.items.reduce((s, i) => s + i.cy, 0) / best.items.length
     } else {
-      lines.push({ y: t.y, items: [t] })
+      lines.push({ cy: t.cy, items: [t] })
     }
   }
+  lines.sort((a, b) => a.cy - b.cy)
 
-  // Within each line, merge adjacent tokens into cells on small gaps
-  const lineCells: { x: number; text: string }[][] = lines.map((line) => {
+  // —— Within each row: form cells by gap (large gap = new column cell) ——
+  // Gap threshold: relative to median char width / height
+  const widths = withCy.map((t) => t.w / Math.max(1, t.text.replace(/\s/g, '').length || 1))
+  widths.sort((a, b) => a - b)
+  const medCharW = widths[Math.floor(widths.length / 2)] || medH * 0.5
+  // Words in same cell: gap less than ~1.6 character widths
+  // Different columns: gap larger than ~2.2 character widths or fraction of row span
+  const gapSameCell = Math.max(medCharW * 1.75, medH * 0.35)
+
+  const rowCells: TableCell[][] = lines.map((line) => {
     const items = [...line.items].sort((a, b) => a.x - b.x)
-    const cells: { x: number; text: string }[] = []
-    let cur: { x: number; text: string; right: number } | null = null
-    const gapMerge = medH * 0.85
+    const cells: TableCell[] = []
+    let cur: TableCell | null = null
     for (const it of items) {
+      const piece = it.text
       if (!cur) {
-        cur = { x: it.x, text: it.text, right: it.x + it.w }
+        cur = {
+          text: piece,
+          x: it.x,
+          y: it.y,
+          w: it.w,
+          h: it.h,
+          right: it.right,
+          cx: it.cx,
+          cy: it.cy,
+        }
         continue
       }
       const gap = it.x - cur.right
-      if (gap < gapMerge) {
-        const space = gap > medH * 0.12 ? ' ' : ''
-        cur.text += space + it.text
-        cur.right = Math.max(cur.right, it.x + it.w)
+      // Merge only when clearly the same cell (small gap / slight overlap)
+      if (gap <= gapSameCell) {
+        // Preserve exact characters: space only when PDF/OCR left a real gap
+        const needSpace =
+          gap > medCharW * 0.25 &&
+          !/\s$/.test(cur.text) &&
+          !/^\s/.test(piece)
+        cur.text = cur.text + (needSpace ? ' ' : '') + piece
+        cur.right = Math.max(cur.right, it.right)
+        cur.w = cur.right - cur.x
+        cur.h = Math.max(cur.h, it.h)
+        cur.y = Math.min(cur.y, it.y)
+        cur.cx = (cur.x + cur.right) / 2
+        cur.cy = (cur.cy + it.cy) / 2
       } else {
-        cells.push({ x: cur.x, text: cur.text })
-        cur = { x: it.x, text: it.text, right: it.x + it.w }
+        cells.push(cur)
+        cur = {
+          text: piece,
+          x: it.x,
+          y: it.y,
+          w: it.w,
+          h: it.h,
+          right: it.right,
+          cx: it.cx,
+          cy: it.cy,
+        }
       }
     }
-    if (cur) cells.push({ x: cur.x, text: cur.text })
-    return cells
+    if (cur) cells.push(cur)
+    // Trim only outer whitespace of the finished cell value
+    return cells.map((c) => ({
+      ...c,
+      text: c.text.replace(/^\s+|\s+$/g, ''),
+    }))
   })
 
-  // Global column anchors from multi-cell rows
-  const anchors: number[] = []
-  for (const cells of lineCells) {
-    if (cells.length >= 2) {
-      for (const c of cells) anchors.push(c.x)
-    }
-  }
-  // If almost everything is single-column, try delimiter parse on full lines
-  const multi = lineCells.filter((c) => c.length >= 2).length
-  if (multi < Math.max(2, lineCells.length * 0.15)) {
-    const plain = lines
-      .map((l) =>
-        [...l.items]
-          .sort((a, b) => a.x - b.x)
-          .map((i) => i.text)
-          .join(' '),
-      )
+  // —— Detect if this is multi-column tabular data ——
+  const multiRows = rowCells.filter((c) => c.length >= 2).length
+  if (multiRows < Math.max(2, Math.floor(rowCells.length * 0.12))) {
+    // Mostly single-column prose — still try delimiter tables, else one cell per line
+    const plain = rowCells
+      .map((cells) => cells.map((c) => c.text).join('  '))
       .join('\n')
     const delim = plainTextToGrid(plain)
-    if (delim.some((r) => r.length >= 2)) return delim
+    if (delim.some((r) => r.length >= 2)) return normalizeGrid(delim)
+    return normalizeGrid(rowCells.map((cells) => [cells.map((c) => c.text).join(' ')]))
   }
 
-  const colXs = clusterColumnAnchors(anchors.length ? anchors : sorted.map((t) => t.x))
-  if (!colXs.length) {
-    return lineCells.map((cells) => [cells.map((c) => c.text).join(' ')])
-  }
-
-  // Assign cells to columns
-  const grid: string[][] = lineCells.map((cells) => {
-    const row = Array(colXs.length).fill('')
+  // —— Column anchors from cell left edges AND centers (stable table columns) ——
+  const lefts: number[] = []
+  const centers: number[] = []
+  for (const cells of rowCells) {
+    if (cells.length < 2) continue
     for (const c of cells) {
+      lefts.push(c.x)
+      centers.push(c.cx)
+    }
+  }
+  const pageSpan = (() => {
+    let min = Infinity
+    let max = -Infinity
+    for (const cells of rowCells) {
+      for (const c of cells) {
+        min = Math.min(min, c.x)
+        max = Math.max(max, c.right)
+      }
+    }
+    return Math.max(1, max - min)
+  })()
+
+  // Adaptive column gap: ~3% of page width or 1.8× cell gap threshold
+  const colGapTol = Math.max(gapSameCell * 1.4, pageSpan * 0.028, 12)
+  const colXs = clusterAnchors(
+    lefts.length ? lefts : centers,
+    colGapTol,
+  )
+  if (!colXs.length) {
+    return normalizeGrid(
+      rowCells.map((cells) => cells.map((c) => c.text)),
+    )
+  }
+
+  // —— Assign each cell to the best column by left-edge / center proximity ——
+  // Prefer the column whose anchor is nearest to cell.x (start of cell)
+  // Do not merge unrelated cells: only one primary occupant per slot;
+  // if two cells map to same column, keep both only if they are the same cell area (join with space)
+  const grid: string[][] = rowCells.map((cells) => {
+    const row = Array.from({ length: colXs.length }, () => '')
+    const owners = Array.from({ length: colXs.length }, () => -1 as number)
+    // Sort cells left→right so earlier columns fill first
+    const ordered = [...cells].sort((a, b) => a.x - b.x)
+    for (const cell of ordered) {
       let best = 0
-      let bestDist = Infinity
+      let bestScore = Infinity
       for (let i = 0; i < colXs.length; i++) {
-        const d = Math.abs(c.x - colXs[i])
-        if (d < bestDist) {
-          bestDist = d
+        // Score: distance of left edge to column anchor (primary) + slight center term
+        const dLeft = Math.abs(cell.x - colXs[i])
+        const dCx = Math.abs(cell.cx - colXs[i])
+        const score = dLeft * 0.7 + dCx * 0.3
+        // Prefer empty columns when scores are close (avoid stacking wrong)
+        const occupiedPenalty = row[i] ? pageSpan * 0.02 : 0
+        const s = score + occupiedPenalty
+        if (s < bestScore) {
+          bestScore = s
           best = i
         }
       }
-      row[best] = row[best] ? `${row[best]} ${c.text}` : c.text
+      // If best column already has content and this cell is clearly a different box, try next free
+      if (row[best] && Math.abs(cell.x - colXs[best]) > colGapTol * 0.85) {
+        let free = -1
+        let freeScore = Infinity
+        for (let i = 0; i < colXs.length; i++) {
+          if (row[i]) continue
+          const s = Math.abs(cell.x - colXs[i])
+          if (s < freeScore) {
+            freeScore = s
+            free = i
+          }
+        }
+        if (free >= 0 && freeScore < colGapTol * 2) best = free
+      }
+      if (!row[best]) {
+        row[best] = cell.text
+        owners[best] = cell.x
+      } else {
+        // Same column slot: append only if this continues the same field (close to previous)
+        row[best] = `${row[best]} ${cell.text}`.replace(/\s+/g, ' ').trim()
+      }
     }
     return row
   })
 
-  // Drop fully empty columns
-  const keep: number[] = []
-  for (let c = 0; c < colXs.length; c++) {
-    if (grid.some((r) => String(r[c] || '').trim())) keep.push(c)
-  }
-  const slim = grid
-    .map((r) => keep.map((i) => r[i] || ''))
-    .filter((r) => r.some((c) => c.trim()))
-
-  return slim.length ? slim : [['(empty)']]
+  return normalizeGrid(grid)
 }
 
-function clusterColumnAnchors(xs: number[]): number[] {
+function clusterAnchors(xs: number[], gapTol: number): number[] {
   if (!xs.length) return []
   const sorted = [...xs].sort((a, b) => a - b)
-  // gap threshold: larger of 24px or 4% of span
-  const span = sorted[sorted.length - 1] - sorted[0] || 1
-  const gapTol = Math.max(24, span * 0.045)
   const clusters: number[][] = [[sorted[0]]]
   for (let i = 1; i < sorted.length; i++) {
     const last = clusters[clusters.length - 1]
-    if (sorted[i] - last[last.length - 1] > gapTol) clusters.push([sorted[i]])
+    const anchor = last.reduce((a, b) => a + b, 0) / last.length
+    if (sorted[i] - anchor > gapTol) clusters.push([sorted[i]])
     else last.push(sorted[i])
   }
   return clusters.map((c) => c.reduce((a, b) => a + b, 0) / c.length)
+}
+
+/** Drop empty rows/cols; pad so every row has the same column count. */
+function normalizeGrid(grid: string[][]): string[][] {
+  if (!grid.length) return []
+  const maxC = Math.max(...grid.map((r) => r.length), 1)
+  const padded = grid.map((r) => {
+    const copy = r.map((c) => preserveCellValue(c))
+    while (copy.length < maxC) copy.push('')
+    return copy
+  })
+  const keepCols: number[] = []
+  for (let c = 0; c < maxC; c++) {
+    if (padded.some((r) => r[c].trim())) keepCols.push(c)
+  }
+  const slim = padded
+    .map((r) => keepCols.map((i) => r[i]))
+    .filter((r) => r.some((c) => c.trim()))
+  return slim.length ? slim : [['(empty)']]
 }
 
 function plainTextToGrid(text: string): string[][] {
@@ -1299,31 +1525,27 @@ function plainTextToGrid(text: string): string[][] {
     if (line.includes('\t')) {
       return line.split('\t').map((c) => c.trim())
     }
-    // pipe tables
     if ((line.match(/\|/g) || []).length >= 2) {
       return line
         .split('|')
         .map((c) => c.trim())
-        .filter((c, i, arr) => !(i === 0 && !c) && !(i === arr.length - 1 && !c))
+        .filter(
+          (c, i, arr) =>
+            !(i === 0 && !c) && !(i === arr.length - 1 && !c),
+        )
     }
-    // CSV-ish
-    if ((line.match(/,/g) || []).length >= 2) {
-      return splitCsvLine(line)
-    }
-    // multi-space columns
+    // Multi-space columns (common in fixed-width table OCR)
     if (/\s{2,}/.test(line)) {
-      return line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+      return line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length)
+    }
+    // CSV only when clearly many commas and not a sentence with one comma
+    if ((line.match(/,/g) || []).length >= 2 && !/,\s+[a-z]/.test(line)) {
+      return splitCsvLine(line)
     }
     return [line.trim()]
   })
 
-  // normalize column count
-  const maxC = Math.max(...rows.map((r) => r.length), 1)
-  return rows.map((r) => {
-    const copy = [...r]
-    while (copy.length < maxC) copy.push('')
-    return copy
-  })
+  return normalizeGrid(rows)
 }
 
 function splitCsvLine(line: string): string[] {
